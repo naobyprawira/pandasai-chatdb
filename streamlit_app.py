@@ -55,18 +55,19 @@ def inject_custom_css():
         }
         
         .stApp {
-            background-color: #f8f9fa;
+            background-color: var(--background-color);
+            color: var(--text-color);
         }
         
         /* Sidebar */
         [data-testid="stSidebar"] {
-            background-color: #ffffff;
-            border-right: 1px solid #e9ecef;
+            background-color: var(--secondary-background-color);
+            border-right: 1px solid var(--secondary-background-color);
         }
         
         /* Headers */
         h1, h2, h3 {
-            color: #1a1a1a;
+            color: var(--text-color);
             font-weight: 600;
         }
         
@@ -83,11 +84,11 @@ def inject_custom_css():
         
         /* Cards/Containers */
         .css-1r6slb0 {
-            background: white;
+            background: var(--secondary-background-color);
             padding: 1.5rem;
             border-radius: 12px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-            border: 1px solid #e9ecef;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            border: 1px solid rgba(128, 128, 128, 0.2);
         }
         
         /* Login Form */
@@ -95,10 +96,22 @@ def inject_custom_css():
             max-width: 400px;
             margin: 100px auto;
             padding: 2rem;
-            background: white;
+            background: var(--secondary-background-color);
             border-radius: 16px;
-            box-shadow: 0 10px 25px rgba(0,0,0,0.05);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
             text-align: center;
+            border: 1px solid rgba(128, 128, 128, 0.2);
+        }
+        
+        /* Dark mode specific overrides if needed */
+        @media (prefers-color-scheme: dark) {
+            .stApp {
+                background-color: #0e1117; /* Streamlit default dark bg */
+            }
+            .css-1r6slb0, .login-container {
+                background-color: #262730; /* Streamlit default dark secondary */
+                border: 1px solid #41424b;
+            }
         }
     </style>
     """, unsafe_allow_html=True)
@@ -147,7 +160,7 @@ def check_password():
     st.markdown("""
         <div class="login-container">
             <h2>🔐 Purchasing Data Assistant</h2>
-            <p style="color: #666; margin-bottom: 2rem;">Silakan login untuk melanjutkan</p>
+            <p style="color: var(--text-color); margin-bottom: 2rem; opacity: 0.8;">Silakan login untuk melanjutkan</p>
         </div>
     """, unsafe_allow_html=True)
     
