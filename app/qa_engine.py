@@ -6,7 +6,7 @@ from contextlib import redirect_stdout
 from dataclasses import dataclass, field
 from typing import Any, List
 
-import openai
+
 import pandas as pd
 from pandas import DataFrame
 
@@ -443,16 +443,20 @@ def _safe_exec(code: str, df: DataFrame) -> tuple[str, list]:
     return output if output.strip() else "", st_components
 
 
+from google import genai
+from google.genai import types
+
 class PandasAIClient:
     """Wrapper that asks the LLM to generate pandas code, then executes it."""
 
     def __init__(self, api_key: str | None = None, model: str | None = None) -> None:
         if not api_key:
-            api_key = settings.openai_api_key
+            api_key = settings.google_api_key
         if not api_key:
-            raise ValueError("OPENAI_API_KEY is required.")
-        self.client = openai.OpenAI(api_key=api_key)
-        self.model = model or settings.default_llm_model
+            raise ValueError("GOOGLE_API_KEY is required.")
+        
+        self.client = genai.Client(api_key=api_key)
+        self.model_name = model or settings.default_llm_model
 
     def _generate_explanation(self, user_question: str, query_result: str) -> str:
         """Generate AI explanation of the query results."""
@@ -470,10 +474,7 @@ class PandasAIClient:
                 query_result=query_result[:3000]  # Limit result size
             )
             
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": """Kamu adalah asisten analisis data yang smart dan informatif.
+            system_instruction = """Kamu adalah asisten analisis data yang smart dan informatif.
 
 TUGAS: Jelaskan hasil query dengan cara yang berguna untuk user.
 
@@ -495,13 +496,18 @@ CONTOH BAIK:
 - "Periode Apr-Jun 2025: naik signifikan dari Rp 5M jadi Rp 15M (3x growth)"
 - "Kategori X: 5 item dengan performa di bawah rata-rata - perlu review"
 
-Gunakan Bahasa Indonesia natural."""},
-                    {"role": "user", "content": prompt}
-                ],
-                max_tokens=500,
-                temperature=0.3,
+Gunakan Bahasa Indonesia natural."""
+
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_instruction,
+                    temperature=0.3,
+                    max_output_tokens=500,
+                )
             )
-            return response.choices[0].message.content or ""
+            return response.text or ""
         except Exception as e:
             # Don't fail the whole query if explanation fails
             return f"(Gagal generate penjelasan: {e})"
@@ -533,7 +539,7 @@ Gunakan Bahasa Indonesia natural."""},
             print(f"[QA DEBUG] === Iteration {iteration}/{MAX_ITERATIONS} ===")
             try:
                 # Build messages with error context if retry
-                messages = [{"role": "system", "content": system_prompt}]
+                current_prompt = prompt
                 
                 if error_history:
                     # Add error context for retry (similar to Data Analyzer)
@@ -545,16 +551,18 @@ Gunakan Bahasa Indonesia natural."""},
                     error_context += "2. Jika tidak yakin, print: available_cols = df.columns.tolist()\n"
                     error_context += "3. Gunakan approach lebih simple jika kode complex\n\n"
                     error_context += f"USER QUESTION: {prompt}"
-                    messages.append({"role": "user", "content": error_context})
-                else:
-                    messages.append({"role": "user", "content": prompt})
+                    current_prompt = error_context
                 
                 # Generate code
-                response = self.client.chat.completions.create(
-                    model=self.model,
-                    messages=messages,
+                response = self.client.models.generate_content(
+                    model=self.model_name,
+                    contents=current_prompt,
+                    config=types.GenerateContentConfig(
+                        system_instruction=system_prompt,
+                        temperature=0.1,
+                    )
                 )
-                raw_answer = response.choices[0].message.content or ""
+                raw_answer = response.text or ""
                 code = _extract_code(raw_answer)
                 print(f"[QA DEBUG] Generated code:\n{code[:200]}..." if len(code) > 200 else f"[QA DEBUG] Generated code:\n{code}")
                 result, st_components = _safe_exec(code, df)

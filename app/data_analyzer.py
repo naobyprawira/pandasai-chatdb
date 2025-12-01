@@ -57,10 +57,13 @@ def _dataframe_to_sample_text(df: DataFrame, max_rows: int = MAX_SAMPLE_ROWS) ->
     return "\n".join(lines)
 
 
-def _get_openai_client():
-    """Get OpenAI client."""
-    from openai import OpenAI
-    return OpenAI(api_key=settings.openai_api_key)
+from google import genai
+
+def _get_gemini_client():
+    """Get Gemini client."""
+    if not settings.google_api_key:
+        raise ValueError("GOOGLE_API_KEY is required.")
+    return genai.Client(api_key=settings.google_api_key)
 
 
 def _compare_dataframes(original: DataFrame, transformed: DataFrame) -> List[str]:
@@ -79,7 +82,6 @@ def _compare_dataframes(original: DataFrame, transformed: DataFrame) -> List[str
     if len(transformed.columns) == 0:
         issues.append("❌ CRITICAL: Tidak ada kolom")
         return issues
-    
     # Check column loss - CRITICAL if >50% columns removed (unless it's unpivot which reduces columns intentionally)
     orig_cols = len(original.columns)
     trans_cols = len(transformed.columns)
@@ -113,9 +115,6 @@ def _generate_transform_code(
     """
     Generate transformation code using AI.
     Returns: (code, summary, issues, needs_transform, failed_code)
-    
-    failed_code will be non-empty if the generated code was dangerous/blocked.
-    original_df is the untouched original data for reference during retries.
     """
     sample_text = _dataframe_to_sample_text(df, MAX_SAMPLE_ROWS)
     
@@ -311,12 +310,7 @@ df = ...
 # END_CODE
 """
 
-    response = client.chat.completions.create(
-        model=settings.default_llm_model,
-        messages=[
-            {
-                "role": "system", 
-                "content": """Kamu adalah pandas expert. Normalisasi tabel dengan cara TRADISIONAL dan SIMPLE.
+    system_instruction = """Kamu adalah pandas expert. Normalisasi tabel dengan cara TRADISIONAL dan SIMPLE.
 
 PRINSIP UTAMA:
 1. BUAT nama kolom sendiri yang bersih - JANGAN copy dari data mentah
@@ -330,14 +324,19 @@ DILARANG KERAS:
 - Mengambil nama kolom dari data yang mungkin duplikat
 - df.dtype (gunakan df.dtypes)
 - File I/O apapun"""
-            },
-            {"role": "user", "content": prompt}
-        ],
-        max_tokens=1500,
-        temperature=0.1,
+
+    from google.genai import types
+    response = client.models.generate_content(
+        model=settings.default_llm_model,
+        contents=prompt,
+        config=types.GenerateContentConfig(
+            system_instruction=system_instruction,
+            temperature=0.1,
+            max_output_tokens=1500,
+        )
     )
     
-    raw_response = response.choices[0].message.content
+    raw_response = response.text
     if not raw_response:
         return "df = df.copy()", "AI tidak memberikan response", [], False, ""
     
@@ -345,10 +344,7 @@ DILARANG KERAS:
 
 
 def _parse_ai_response(response: str) -> tuple[str, str, List[str], bool, str]:
-    """Parse AI response. Returns: (code, summary, issues, needs_transform, failed_code)
-    
-    failed_code will contain the original dangerous code if validation fails.
-    """
+    """Parse AI response. Returns: (code, summary, issues, needs_transform, failed_code)"""
     
     # Extract NEEDS_TRANSFORM
     needs_match = re.search(r'NEEDS_TRANSFORM:\s*(YES|NO)', response, re.IGNORECASE)
@@ -374,70 +370,43 @@ def _parse_ai_response(response: str) -> tuple[str, str, List[str], bool, str]:
     code_match = re.search(r'PYTHON_CODE:\s*\n(.*?)(?:#\s*END_CODE|$)', response, re.DOTALL | re.IGNORECASE)
     if code_match:
         code = code_match.group(1).strip()
-        # Remove markdown code blocks if AI included them anyway
         code = re.sub(r'^```python\s*\n?', '', code)
         code = re.sub(r'^```\s*\n?', '', code)
         code = re.sub(r'\n?```\s*$', '', code)
         code = code.strip()
     
-    # If code contains function definition, extract body or wrap call
     if 'def ' in code and 'return' in code:
-        # Try to extract function name and add call
         func_match = re.search(r'def\s+(\w+)\s*\(', code)
         if func_match:
             func_name = func_match.group(1)
             code = code + f"\ndf = {func_name}(df)"
     
-    # VALIDATE CODE - Block dangerous patterns
+    # VALIDATE CODE
     dangerous_patterns = [
-        (r'pd\.read_excel\s*\(', 'pd.read_excel() - df sudah ada, tidak perlu baca file!'),
-        (r'pd\.read_csv\s*\(', 'pd.read_csv() - df sudah ada, tidak perlu baca file!'),
-        (r'pd\.read_parquet\s*\(', 'pd.read_parquet() - df sudah ada, tidak perlu baca file!'),
-        (r'open\s*\([\'"]', 'open() - jangan baca file langsung!'),
-    ]
-    
-    # Block complex functions that often cause issues with duplicate columns
-    complex_patterns = [
-        (r'\.melt\s*\(', 'melt() - gunakan for loop + pd.DataFrame() sebagai gantinya!'),
-        (r'\.pivot\s*\(', 'pivot() - gunakan for loop + pd.DataFrame() sebagai gantinya!'),
-        (r'\.pivot_table\s*\(', 'pivot_table() - gunakan for loop + pd.DataFrame() sebagai gantinya!'),
-        (r'\.stack\s*\(', 'stack() - gunakan for loop + pd.DataFrame() sebagai gantinya!'),
-        (r'\.unstack\s*\(', 'unstack() - gunakan for loop + pd.DataFrame() sebagai gantinya!'),
+        (r'pd\.read_excel\s*\(', 'pd.read_excel()'),
+        (r'pd\.read_csv\s*\(', 'pd.read_csv()'),
+        (r'pd\.read_parquet\s*\(', 'pd.read_parquet()'),
+        (r'open\s*\([\'"]', 'open()'),
     ]
     
     for pattern, error_msg in dangerous_patterns:
         if re.search(pattern, code):
-            # Return with failed_code containing the dangerous code
             return (
-                "df = df.copy()",  # Safe fallback
+                "df = df.copy()",
                 f"❌ AI generate kode berbahaya: {error_msg}",
                 [f"Kode mencoba {error_msg}"],
-                True,  # needs_transform = True so we retry
-                code   # Store the failed code for debugging
-            )
-    
-    # Check for complex patterns - these need simpler alternatives
-    for pattern, error_msg in complex_patterns:
-        if re.search(pattern, code):
-            return (
-                "df = df.copy()",  # Safe fallback
-                f"⚠️ Kode terlalu kompleks: {error_msg}",
-                [f"Gunakan approach tradisional: {error_msg}"],
-                True,  # needs_transform = True so we retry with simpler approach
-                code   # Store the complex code for debugging
+                True,
+                code
             )
     
     if not code or len(code) < 3:
         code = "df = df.copy()"
     
-    return code, summary, issues, needs_transform, ""  # No failed_code
+    return code, summary, issues, needs_transform, ""
 
 
 def execute_transform(df: DataFrame, code: str) -> tuple[DataFrame, str]:
-    """
-    Execute transformation code on DataFrame.
-    Returns: (transformed_df, error_message or empty string)
-    """
+    """Execute transformation code on DataFrame."""
     import numpy as np
     import re as re_module
     import datetime
@@ -453,23 +422,17 @@ def execute_transform(df: DataFrame, code: str) -> tuple[DataFrame, str]:
         
         exec(code, {"__builtins__": __builtins__}, local_ns)
         
-        # Try to get result from various common variable names
         result_df = None
-        
-        # Priority order: df (most common), then other common names
         for var_name in ["df", "df_result", "df_new", "df_transformed", "df_melted", "df_final", "result"]:
             if var_name in local_ns and isinstance(local_ns[var_name], DataFrame):
                 result_df = local_ns[var_name]
                 break
         
-        # If still not found, look for ANY DataFrame in namespace (last resort)
         if result_df is None:
             for var_name, var_value in local_ns.items():
                 if isinstance(var_value, DataFrame) and var_name != "_":
-                    # Skip the original df if it hasn't been modified
                     if var_name == "df" or (len(var_value) != len(df) or list(var_value.columns) != list(df.columns)):
                         result_df = var_value
-                        print(f"[DEBUG] execute_transform: Found result in variable '{var_name}'")
                         break
         
         if result_df is None:
@@ -490,28 +453,9 @@ def analyze_and_generate_transform(
     sheet_name: str = "",
     user_description: str = ""
 ) -> TransformResult:
-    """
-    Analyze data structure, generate transformation code, execute it,
-    validate the result, and iterate if needed.
-    
-    This function:
-    1. Asks AI to analyze and generate code
-    2. Executes the code on sample data
-    3. Validates result (checks for data loss)
-    4. If issues found, asks AI to fix and retry (up to MAX_ITERATIONS)
-    5. Returns result with preview_df already populated
-    
-    Args:
-        df: Raw DataFrame
-        filename: Original filename for context
-        sheet_name: Sheet name for context
-        user_description: User's description of the data structure
-        
-    Returns:
-        TransformResult with preview_df already cached
-    """
+    """Analyze data structure, generate transformation code, execute it, validate, and iterate."""
     try:
-        client = _get_openai_client()
+        client = _get_gemini_client()
     except Exception as e:
         return TransformResult(
             summary=f"Error koneksi API: {str(e)}",
@@ -519,40 +463,33 @@ def analyze_and_generate_transform(
             transform_code="df = df.copy()",
             needs_transform=False,
             preview_df=df.head(20).copy(),
-            original_df=df.head(50).copy(),  # Keep original for context
+            original_df=df.head(50).copy(),
             validation_notes=["Tidak bisa konek ke AI"],
         )
     
-    # Keep original sample for feedback context
     original_sample = df.head(50).copy()
-    
     validation_notes = []
     previous_issues = None
-    previous_code = None  # Track previous code for error analysis
-    error_history = []  # Track error history for learning
-    last_failed_code = ""  # Track dangerous/failed code for debugging
+    previous_code = None
+    error_history = []
+    last_failed_code = ""
     
     for iteration in range(1, MAX_ITERATIONS + 1):
         try:
-            # Step 1: Generate transform code (include previous code & error history if retry)
-            # Pass original_sample for retry iterations so AI can compare with original data
             code, summary, issues, needs_transform, failed_code = _generate_transform_code(
                 client, df, filename, sheet_name, previous_issues, user_description, 
                 previous_code, error_history, original_df=original_sample
             )
             
-            # Check if AI generated dangerous code (pd.read_excel, etc.)
             if failed_code:
-                validation_notes.append(f"Iterasi {iteration}: ❌ Kode berbahaya - {summary}")
-                error_entry = {"iteration": iteration, "error": f"DANGEROUS CODE: {summary}", "code": failed_code}
-                error_history.append(error_entry)
-                previous_issues = [f"KODE BERBAHAYA: {summary}", "JANGAN GUNAKAN pd.read_excel/csv - df SUDAH ADA!"]
-                previous_code = failed_code  # Show AI what NOT to do
-                last_failed_code = failed_code  # Keep for final error display
+                validation_notes.append(f"Iterasi {iteration}: ❌ Kode berbahaya")
+                error_history.append({"iteration": iteration, "error": "Dangerous code", "code": failed_code})
+                previous_issues = ["Kode berbahaya detected"]
+                previous_code = failed_code
+                last_failed_code = failed_code
                 continue
             
             if not needs_transform:
-                # No transformation needed
                 return TransformResult(
                     summary=summary,
                     issues_found=issues,
@@ -560,62 +497,42 @@ def analyze_and_generate_transform(
                     needs_transform=False,
                     preview_df=df.head(20).copy(),
                     original_df=original_sample,
-                    validation_notes=["Data sudah dalam format yang baik"],
+                    validation_notes=["Data sudah OK"],
                     iterations_used=iteration,
                 )
             
-            # Step 2: Execute transformation on sample
             sample_df = df.head(100).copy()
             transformed_df, error = execute_transform(sample_df, code)
             
             if error:
                 validation_notes.append(f"Iterasi {iteration}: Error eksekusi - {error}")
-                error_entry = {"iteration": iteration, "error": error, "code": code}
-                error_history.append(error_entry)  # Save to history
-                previous_issues = [f"ERROR: {error}"]
-                previous_code = code  # Save failed code for next iteration
+                error_history.append({"iteration": iteration, "error": error, "code": code})
+                previous_issues = [f"Error: {error}"]
+                previous_code = code
                 last_failed_code = code
                 continue
             
-            # Step 2.5: Check for duplicate column names (common issue)
-            if transformed_df is not None:
+            # Check for duplicate columns
+            if transformed_df is not None and transformed_df.columns.duplicated().any():
                 dup_cols = transformed_df.columns[transformed_df.columns.duplicated()].tolist()
-                if dup_cols:
-                    dup_error = f"Duplicate column names: {dup_cols[:5]}... Total {len(dup_cols)} duplicates"
-                    validation_notes.append(f"Iterasi {iteration}: ❌ {dup_error}")
-                    error_entry = {"iteration": iteration, "error": dup_error, "code": code}
-                    error_history.append(error_entry)
-                    previous_issues = [
-                        f"DUPLICATE COLUMNS: {dup_cols[:5]}",
-                        "SOLUSI: Rename semua kolom ke unique names dulu: df.columns = [f'col_{i}' for i in range(len(df.columns))]",
-                        "Atau: Gunakan iloc untuk akses kolom by index, bukan by name"
-                    ]
-                    previous_code = code
-                    last_failed_code = code
-                    continue
-            
-            # Step 3: Validate - compare with original
+                error = f"Duplicate columns: {dup_cols[:5]}"
+                validation_notes.append(f"Iterasi {iteration}: {error}")
+                error_history.append({"iteration": iteration, "error": error, "code": code})
+                previous_issues = [error]
+                previous_code = code
+                last_failed_code = code
+                continue
+
             comparison_issues = _compare_dataframes(sample_df, transformed_df)
-            
-            # Separate CRITICAL issues from warnings
             critical_issues = [i for i in comparison_issues if i.startswith("❌")]
-            warning_issues = [i for i in comparison_issues if i.startswith("⚠️")]
             
             if critical_issues:
-                # Only retry if there are critical issues
-                validation_notes.append(f"Iterasi {iteration}: {'; '.join(critical_issues)}")
-                error_entry = {"iteration": iteration, "error": "; ".join(critical_issues), "code": code}
-                error_history.append(error_entry)  # Save to history
-                previous_issues = [i.replace("❌ CRITICAL: ", "") for i in critical_issues]
-                previous_code = code  # Save failed code for next iteration
+                validation_notes.append(f"Iterasi {iteration}: Validation failed - {critical_issues}")
+                error_history.append({"iteration": iteration, "error": str(critical_issues), "code": code})
+                previous_issues = critical_issues
+                previous_code = code
                 last_failed_code = code
                 continue
-            
-            # Accept result even with warnings
-            if warning_issues:
-                validation_notes.append(f"Iterasi {iteration}: {'; '.join(warning_issues)} - Tetap diterima")
-            else:
-                validation_notes.append(f"Iterasi {iteration}: Validasi berhasil")
             
             return TransformResult(
                 summary=summary,
@@ -624,26 +541,24 @@ def analyze_and_generate_transform(
                 needs_transform=True,
                 preview_df=transformed_df.head(20).copy(),
                 original_df=original_sample,
-                validation_notes=validation_notes,
+                validation_notes=validation_notes + ["Success"],
                 iterations_used=iteration,
             )
             
         except Exception as e:
             validation_notes.append(f"Iterasi {iteration}: Exception - {str(e)}")
-            previous_issues = [f"Error: {str(e)}"]
-    
-    # All iterations failed - return last attempt with warning
+            previous_issues = [str(e)]
+            
     return TransformResult(
-        summary=f"❌ Transformasi tidak berhasil setelah {MAX_ITERATIONS} percobaan",
+        summary="Gagal setelah max iterations",
         issues_found=previous_issues or [],
-        transform_code="df = df.copy()  # Fallback - no transformation",
+        transform_code="df = df.copy()",
         needs_transform=False,
         preview_df=df.head(20).copy(),
         original_df=original_sample,
         validation_notes=validation_notes,
-        iterations_used=MAX_ITERATIONS,
         has_error=True,
-        failed_code=last_failed_code,  # Store the last failed code for debugging
+        failed_code=last_failed_code
     )
 
 
@@ -672,7 +587,7 @@ def regenerate_with_feedback(
         TransformResult with new transformation based on feedback
     """
     try:
-        client = _get_openai_client()
+        model = _get_gemini_model()
     except Exception as e:
         return TransformResult(
             summary=f"Error koneksi API: {str(e)}",
@@ -726,12 +641,7 @@ df = ...
 """
 
     try:
-        response = client.chat.completions.create(
-            model=settings.default_llm_model,
-            messages=[
-                {
-                    "role": "system", 
-                    "content": """Fix kode pandas. Rules:
+        system_instruction = """Fix kode pandas. Rules:
 ❌ df.dtype, df[['a','b']], file I/O, melt(), pivot()
 ✅ df.dtypes, split satu-satu, .astype(str), for loop
 ⚠️ WAJIB: Simpan hasil akhir ke variable `df` (bukan df_new, df_result, dll)
@@ -742,14 +652,18 @@ df = pd.DataFrame(rows)  # OK - reassign ke df
 
 Contoh SALAH:
 df_new = df.iloc[3:]  # SALAH - hasil di df_new, bukan df"""
-                },
-                {"role": "user", "content": prompt}
-            ],
-            max_tokens=1000,
-            temperature=0.1,
+
+        full_prompt = f"{system_instruction}\n\nUSER PROMPT:\n{prompt}"
+
+        response = model.generate_content(
+            full_prompt,
+            generation_config=genai.types.GenerationConfig(
+                temperature=0.1,
+                max_output_tokens=1000,
+            )
         )
         
-        raw_response = response.choices[0].message.content
+        raw_response = response.text
         if not raw_response:
             return TransformResult(
                 summary="AI tidak memberikan response",

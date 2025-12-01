@@ -15,9 +15,9 @@ UPLOAD_DIR = BASE_DIR / "data" / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 CATALOG_DB = BASE_DIR / "data" / "catalog.db"
-DEFAULT_LLM_MODEL = os.getenv("PANDASAI_LLM_MODEL", "gpt-4o-mini")
+DEFAULT_LLM_MODEL = os.getenv("PANDASAI_LLM_MODEL", "gemini-1.5-flash")
 UPLOAD_MAX_MB = int(os.getenv("UPLOAD_MAX_MB", 25))
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
 
 
 class AppSettings:
@@ -28,4 +28,7 @@ class AppSettings:
     catalog_db: Path = CATALOG_DB
     default_llm_model: str = DEFAULT_LLM_MODEL
     upload_max_mb: int = UPLOAD_MAX_MB
-    openai_api_key: str = OPENAI_API_KEY
+    catalog_db: Path = CATALOG_DB
+    default_llm_model: str = DEFAULT_LLM_MODEL
+    upload_max_mb: int = UPLOAD_MAX_MB
+    google_api_key: str = os.getenv("GOOGLE_API_KEY", "")

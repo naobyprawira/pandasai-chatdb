@@ -293,9 +293,9 @@ def render_st_components(components: list):
 def process_question(question: str, table: CachedDataInfo):
     """Process question with selected table."""
     # Use API Key from settings/env
-    api_key = settings.openai_api_key
+    api_key = settings.google_api_key
     if not api_key:
-        add_message("assistant", "❌ OpenAI API Key belum dikonfigurasi oleh admin.")
+        add_message("assistant", "❌ Google API Key belum dikonfigurasi oleh admin.")
         return
     
     try:

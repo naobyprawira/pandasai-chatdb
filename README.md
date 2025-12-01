@@ -1,56 +1,107 @@
-# PandasAI File Q&A
+# PandasAI Purchasing Chat
 
-Simple Streamlit app that lets users upload tabular data, catalog it, and ask questions powered by [PandasAI](https://github.com/sinaptik-ai/pandas-ai).
+An intelligent data analysis application tailored for purchasing data, powered by **Google Gemini 1.5 Flash** and **PandasAI**. This tool allows users to upload datasets, perform natural language queries, and automatically transform data for analysis.
 
 ## Features
 
-- Upload CSV/TSV/Excel files (per-user storage)
-- Catalog of previously uploaded datasets with metadata persisted in SQLite
-- Natural language Q&A using PandasAI + OpenAI
-- Configurable via `.env`
+-   **AI-Powered Q&A**: Ask questions about your data in plain English using Google's Gemini 2.5 Flash model.
+-   **Intelligent Data Transformation**: Automatically cleans and normalizes messy Excel/CSV data. The AI iteratively generates, executes, and validates transformation code, self-correcting if errors occur.
+-   **OneDrive Integration**: Directly browse, select, and upload files from your OneDrive for Business.
+-   **Secure Access**: Simple password-based authentication to protect your data.
+-   **Data Catalog**: Keeps track of uploaded files and their metadata using a local SQLite database.
+-   **Interactive Dashboard**: Built with Streamlit for a responsive and user-friendly experience.
 
-## Getting started
+## Prerequisites
 
-1. **Install dependencies** (Windows `cmd.exe` assumed):
+-   **Docker Desktop** (Recommended)
+-   **Google API Key** (Get one from [Google AI Studio](https://aistudio.google.com/))
+-   **OneDrive Credentials** (Client ID, Secret, Tenant ID) - *Optional, for OneDrive features*
 
-```cmd
-python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-pip install -r requirements-dev.txt  2>nul && echo (optional)
+## Configuration
+
+1.  Clone the repository.
+2.  Copy `.env.example` to `.env`:
+    ```bash
+    cp .env.example .env
+    ```
+3.  Edit `.env` and set the following variables:
+    ```ini
+    # Required
+    GOOGLE_API_KEY=your_google_api_key_here
+    APP_PASSWORD=admin123  # Set your desired login password
+
+    # Optional (for OneDrive Integration)
+    ONEDRIVE_CLIENT_ID=your_client_id
+    ONEDRIVE_CLIENT_SECRET=your_client_secret
+    ONEDRIVE_TENANT_ID=your_tenant_id
+    ONEDRIVE_USER_ID=your_user_id
+    ```
+
+## Running the Application
+
+### Option 1: Using Docker (Recommended)
+
+The easiest way to run the app is using Docker Compose. This ensures all dependencies and the environment are correctly set up.
+
+1.  Build and start the container:
+    ```bash
+    docker-compose up -d --build
+    ```
+2.  Open your browser and navigate to:
+    ```
+    http://localhost:8505
+    ```
+
+### Option 2: Running Locally
+
+If you prefer to run it without Docker:
+
+1.  Create a virtual environment:
+    ```bash
+    python -m venv .venv
+    # Windows
+    .venv\Scripts\activate
+    # Linux/Mac
+    source .venv/bin/activate
+    ```
+2.  Install dependencies:
+    ```bash
+    pip install -r requirements.txt
+    ```
+3.  Run the Streamlit app:
+    ```bash
+    streamlit run streamlit_app.py --server.port 8505
+    ```
+
+## Project Structure
+
+```
+.
+├── app/
+│   ├── data_analyzer.py  # AI-driven data transformation logic
+│   ├── data_store.py     # SQLite database operations
+│   ├── datasets.py       # File handling and dataframe management
+│   ├── onedrive_client.py# OneDrive API integration
+│   ├── qa_engine.py      # PandasAI and Gemini client wrapper
+│   └── settings.py       # Configuration management
+├── data/                 # Storage for uploaded files and SQLite DB
+├── streamlit_app.py      # Main Streamlit application entry point
+├── Dockerfile            # Docker image definition
+├── docker-compose.yml    # Docker services configuration
+├── requirements.txt      # Python dependencies
+└── .env                  # Environment variables (not committed)
 ```
 
-2. **Configure environment**:
-  - Copy `.env.example` to `.env` and set `OPENAI_API_KEY` plus optional overrides like `PANDASAI_LLM_MODEL` (defaults to `gpt-5.1-mini`).
+## Tech Stack
 
-3. **Run the Streamlit app**:
+-   **Frontend**: Streamlit
+-   **AI Engine**: Google Gemini 1.5 Flash (via `google-genai` SDK)
+-   **Data Processing**: Pandas, PandasAI
+-   **Database**: SQLite
+-   **Containerization**: Docker
 
-```cmd
-.venv\Scripts\activate
-streamlit run streamlit_app.py
-```
+## Troubleshooting
 
-4. Open the provided local URL, upload a dataset, enter your OpenAI key in the sidebar, and start asking questions.
-
-## Testing
-
-Run unit tests (covers the dataset catalog layer):
-
-```cmd
-.venv\Scripts\activate
-pytest
-```
-
-## Project structure
-
-```
-app/
-  data_store.py   # SQLite-backed dataset catalog
-  datasets.py     # Upload persistence & dataframe helpers
-  qa_engine.py    # PandasAI wrapper
-  settings.py     # Centralized configuration
-streamlit_app.py  # Streamlit UI entry point
-requirements.txt  # Runtime deps
-```
-
-Uploads and the SQLite catalog live under `data/`. Clean them up anytime by deleting the directory.
+-   **Port Conflicts**: If port `8505` is in use, modify the `ports` section in `docker-compose.yml` and the `EXPOSE` instruction in `Dockerfile`.
+-   **API Errors**: Ensure your `GOOGLE_API_KEY` is valid and has access to the `gemini-1.5-flash` model.
+-   **OneDrive Issues**: Verify your Azure App Registration permissions if OneDrive sync fails.
