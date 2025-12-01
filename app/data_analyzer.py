@@ -57,13 +57,13 @@ def _dataframe_to_sample_text(df: DataFrame, max_rows: int = MAX_SAMPLE_ROWS) ->
     return "\n".join(lines)
 
 
-from google import genai
+from openai import OpenAI
 
-def _get_gemini_client():
-    """Get Gemini client."""
-    if not settings.google_api_key:
-        raise ValueError("GOOGLE_API_KEY is required.")
-    return genai.Client(api_key=settings.google_api_key)
+def _get_client():
+    """Get OpenAI client."""
+    if not settings.openai_api_key:
+        raise ValueError("OPENAI_API_KEY is required.")
+    return OpenAI(api_key=settings.openai_api_key)
 
 
 def _compare_dataframes(original: DataFrame, transformed: DataFrame) -> List[str]:
@@ -325,18 +325,17 @@ DILARANG KERAS:
 - df.dtype (gunakan df.dtypes)
 - File I/O apapun"""
 
-    from google.genai import types
-    response = client.models.generate_content(
+    response = client.chat.completions.create(
         model=settings.default_llm_model,
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            system_instruction=system_instruction,
-            temperature=0.1,
-            max_output_tokens=1500,
-        )
+        messages=[
+            {"role": "system", "content": system_instruction},
+            {"role": "user", "content": prompt}
+        ],
+        temperature=0.1,
+        max_tokens=1500,
     )
     
-    raw_response = response.text
+    raw_response = response.choices[0].message.content
     if not raw_response:
         return "df = df.copy()", "AI tidak memberikan response", [], False, ""
     
@@ -431,6 +430,7 @@ def execute_transform(df: DataFrame, code: str) -> tuple[DataFrame, str]:
         if result_df is None:
             for var_name, var_value in local_ns.items():
                 if isinstance(var_value, DataFrame) and var_name != "_":
+                # Check if it's a new dataframe or modified original
                     if var_name == "df" or (len(var_value) != len(df) or list(var_value.columns) != list(df.columns)):
                         result_df = var_value
                         break
@@ -455,7 +455,7 @@ def analyze_and_generate_transform(
 ) -> TransformResult:
     """Analyze data structure, generate transformation code, execute it, validate, and iterate."""
     try:
-        client = _get_gemini_client()
+        client = _get_client()
     except Exception as e:
         return TransformResult(
             summary=f"Error koneksi API: {str(e)}",
@@ -587,7 +587,7 @@ def regenerate_with_feedback(
         TransformResult with new transformation based on feedback
     """
     try:
-        model = _get_gemini_model()
+        client = _get_client()
     except Exception as e:
         return TransformResult(
             summary=f"Error koneksi API: {str(e)}",
@@ -653,17 +653,17 @@ df = pd.DataFrame(rows)  # OK - reassign ke df
 Contoh SALAH:
 df_new = df.iloc[3:]  # SALAH - hasil di df_new, bukan df"""
 
-        full_prompt = f"{system_instruction}\n\nUSER PROMPT:\n{prompt}"
-
-        response = model.generate_content(
-            full_prompt,
-            generation_config=genai.types.GenerationConfig(
-                temperature=0.1,
-                max_output_tokens=1000,
-            )
+        response = client.chat.completions.create(
+            model=settings.default_llm_model,
+            messages=[
+                {"role": "system", "content": system_instruction},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.1,
+            max_tokens=1000,
         )
         
-        raw_response = response.text
+        raw_response = response.choices[0].message.content
         if not raw_response:
             return TransformResult(
                 summary="AI tidak memberikan response",

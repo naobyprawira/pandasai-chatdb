@@ -10,4 +10,4 @@ rapidfuzz>=3.0.0
 pyarrow>=14.0.0
 fuzzywuzzy>=0.18.0
 python-Levenshtein>=0.21.0
-google-genai>=0.3.0
+openai>=1.55.0

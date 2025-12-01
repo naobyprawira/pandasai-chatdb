@@ -53,23 +53,6 @@ print(f"Kolom tersedia:", available_cols)
 3. Untuk tanggal, gunakan `pd.to_datetime(..., errors='coerce')`
 4. **UNTUK MENAMPILKAN DATAFRAME:** Gunakan `st.dataframe(df.head(50))` - MAKSIMAL 50 ROWS!
 5. Untuk hasil angka/teks: gunakan `st.write()` atau `st.metric()`
-6. Cetak hasil akhir dalam Bahasa Indonesia
-
-## ⚠️ KRITIS: FUZZY MATCH untuk Search Nama/Teks
-
-**Fungsi `fuzzy_match(series, query, threshold)` SUDAH TERSEDIA! LANGSUNG PAKAI!**
-
-⛔ JANGAN PERNAH:
-- `from fuzzywuzzy import process` ← DILARANG! Tidak tersedia!
-- `def fuzzy_match(...)` ← JANGAN BUAT SENDIRI! Sudah ada!
-- `process.extractOne(...)` ← TIDAK TERSEDIA!
-
-✅ LANGSUNG PAKAI seperti ini:
-```python
-# fuzzy_match sudah tersedia, langsung pakai!
-mask = fuzzy_match(df['Supplier Name'], 'SUNG DONG IL', threshold=80)
-result = df[mask]
-st.dataframe(result.head(50))
 ```
 
 **Contoh penggunaan:**
@@ -90,26 +73,6 @@ st.dataframe(result.head(50))
 - `threshold=80` untuk balance (RECOMMENDED)
 - `threshold=90` untuk match lebih strict
 
-## Cara Menampilkan Hasil:
-
-### PENTING: Tampilkan Kolom Berdasarkan Konteks Pertanyaan User
-Jangan hanya angka! Pilih kolom yang RELEVAN dengan apa yang user tanyakan.
-
-**Smart Column Selection berdasarkan pertanyaan:**
-- User tanya tentang SUPPLIER → include: Supplier/Name + Performance/Score + Value/Cost
-- User tanya tentang PERIODE/BULAN → include: Period/Date + Volume/Quantity + Value
-- User tanya tentang KATEGORI → include: Category + Detail relevant + Summary
-- User tanya tentang PERBANDINGAN → include: Item yang dibanding + Metric yang dibanding
-- User tanya tentang TREND → include: Timeline/Period + Metric + Insight
-
-```python
-# CONTOH SALAH - hanya angka, tanpa konteks:
-total_val = df[df['Category'] == 'ABC'].sum()
-st.write(f"Total: {{total_val}}")  ❌ JANGAN - akses kolom yang mungkin tidak ada!
-
-# CONTOH BENAR - smart pick berdasarkan pertanyaan user:
-# Jika user tanya "Mana supplier terbaik?" 
-# → PERTAMA: Check kolom mana yang ada di df!
 # → KEDUA: Tampilkan: Supplier (context) + Score (jawaban) + Value (supporting)
 available_cols = df.columns.tolist()
 # Tentukan kolom yang akan digunakan
@@ -165,13 +128,27 @@ st.dataframe(monthly.head(12), use_container_width=True)
 ## DILARANG (LIBRARY & FUNGSI):
 - ⛔ JANGAN import library eksternal apapun (contoh: fuzzywuzzy, rapidfuzz, numpy, pandas, re, process, tabulate, dsb) — SEMUA SUDAH TERSEDIA di environment!
 - ⛔ JANGAN definisikan ulang fungsi yang sudah ada di environment (misal: fuzzy_match, pd.to_datetime, dsb)
-- ⛔ JANGAN gunakan `process.extractOne`, `from fuzzywuzzy import ...`, atau import apapun!
-- ⛔ JANGAN buat DataFrame baru dari dict/manual: `pd.DataFrame({{...}})` atau `data = {{...}}`
-- ⛔ JANGAN load ulang data: `df = pd.read_...`
-- ⛔ JANGAN print DataFrame: `print(df.to_markdown())` — gunakan `st.dataframe()`
-- ⛔ JANGAN tampilkan angka mentah tanpa konteks/identifier
 
 Selalu CEK fungsi yang sudah tersedia di environment sebelum membuat fungsi baru!
+
+## ANTI-HALLUCINATION & ERROR PREVENTION:
+1. **NameError Prevention**:
+   - JANGAN: `if condition: x = 1` lalu print(x) ← Error jika condition False!
+   - HARUS: `x = 0` (default) di awal, baru `if condition: x = 1`
+
+2. **KeyError Prevention**:
+   - JANGAN: `df['Disc %']` jika belum yakin kolom ada.
+   - HARUS: `cols = [c for c in ['Disc %', 'Discount'] if c in df.columns]`
+
+3. **Empty Data Prevention**:
+   - JANGAN: `st.dataframe(df[mask])` jika mask kosong.
+   - HARUS:
+     ```python
+     if result.empty:
+         st.warning("Data tidak ditemukan")
+     else:
+         st.dataframe(result.head(50))
+     ```
 
 Balas HANYA dengan blok kode Python (```python ... ```).
 """
@@ -242,9 +219,9 @@ def _fuzzy_match(series: pd.Series, query: str, threshold: int = 85) -> pd.Serie
     More strict matching - query words must be found in value, not just similar.
     
     Matching priority:
-    1. Exact substring: "DONG JIN" in "DONG JIN TEXTILE CO" → match
-    2. All query words present: "JIN DONG" matches "DONG JIN TEXTILE" → match  
-    3. Fuzzy on query as whole: "DONGG JIN" (typo) matches "DONG JIN" → match
+    1. Exact substring: "DONG JIN" in "DONG JIN TEXTILE CO" -> match
+    2. All query words present: "JIN DONG" matches "DONG JIN TEXTILE" -> match  
+    3. Fuzzy on query as whole: "DONGG JIN" (typo) matches "DONG JIN" -> match
     
     Does NOT match just because they share a common word like "TEXTILE".
     """
@@ -443,19 +420,18 @@ def _safe_exec(code: str, df: DataFrame) -> tuple[str, list]:
     return output if output.strip() else "", st_components
 
 
-from google import genai
-from google.genai import types
+from openai import OpenAI
 
 class PandasAIClient:
     """Wrapper that asks the LLM to generate pandas code, then executes it."""
 
     def __init__(self, api_key: str | None = None, model: str | None = None) -> None:
         if not api_key:
-            api_key = settings.google_api_key
+            api_key = settings.openai_api_key
         if not api_key:
-            raise ValueError("GOOGLE_API_KEY is required.")
+            raise ValueError("OPENAI_API_KEY is required.")
         
-        self.client = genai.Client(api_key=api_key)
+        self.client = OpenAI(api_key=api_key)
         self.model_name = model or settings.default_llm_model
 
     def _generate_explanation(self, user_question: str, query_result: str) -> str:
@@ -498,16 +474,16 @@ CONTOH BAIK:
 
 Gunakan Bahasa Indonesia natural."""
 
-            response = self.client.models.generate_content(
+            response = self.client.chat.completions.create(
                 model=self.model_name,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    system_instruction=system_instruction,
-                    temperature=0.3,
-                    max_output_tokens=500,
-                )
+                messages=[
+                    {"role": "system", "content": system_instruction},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.3,
+                max_tokens=500,
             )
-            return response.text or ""
+            return response.choices[0].message.content or ""
         except Exception as e:
             # Don't fail the whole query if explanation fails
             return f"(Gagal generate penjelasan: {e})"
@@ -554,15 +530,15 @@ Gunakan Bahasa Indonesia natural."""
                     current_prompt = error_context
                 
                 # Generate code
-                response = self.client.models.generate_content(
+                response = self.client.chat.completions.create(
                     model=self.model_name,
-                    contents=current_prompt,
-                    config=types.GenerateContentConfig(
-                        system_instruction=system_prompt,
-                        temperature=0.1,
-                    )
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": current_prompt}
+                    ],
+                    temperature=0.1,
                 )
-                raw_answer = response.text or ""
+                raw_answer = response.choices[0].message.content or ""
                 code = _extract_code(raw_answer)
                 print(f"[QA DEBUG] Generated code:\n{code[:200]}..." if len(code) > 200 else f"[QA DEBUG] Generated code:\n{code}")
                 result, st_components = _safe_exec(code, df)

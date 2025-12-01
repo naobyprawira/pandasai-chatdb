@@ -15,10 +15,8 @@ UPLOAD_DIR = BASE_DIR / "data" / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 CATALOG_DB = BASE_DIR / "data" / "catalog.db"
-DEFAULT_LLM_MODEL = os.getenv("PANDASAI_LLM_MODEL", "gemini-1.5-flash")
+DEFAULT_LLM_MODEL = os.getenv("PANDASAI_LLM_MODEL", "gpt-5.1-mini")
 UPLOAD_MAX_MB = int(os.getenv("UPLOAD_MAX_MB", 25))
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
-
 
 class AppSettings:
     """Simple settings accessor to keep imports tidy."""
@@ -28,7 +26,9 @@ class AppSettings:
     catalog_db: Path = CATALOG_DB
     default_llm_model: str = DEFAULT_LLM_MODEL
     upload_max_mb: int = UPLOAD_MAX_MB
-    catalog_db: Path = CATALOG_DB
-    default_llm_model: str = DEFAULT_LLM_MODEL
-    upload_max_mb: int = UPLOAD_MAX_MB
-    google_api_key: str = os.getenv("GOOGLE_API_KEY", "")
+    
+    # Security
+    app_password: str = "admin123"
+    
+    # API Keys
+    openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
