@@ -1,0 +1,11 @@
+{
+	"folders": [
+		{
+			"path": ".."
+		},
+		{
+			"path": "../../OpenAI-LangChain-Pandas-DF-Agent-Query-Streamlit-App/AppV3"
+		}
+	],
+	"settings": {}
+}

@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  pandasai-purchasing-chat:
+    container_name: pandasai-purchasing-chat-container
+    build: .
+    ports:
+      - "8505:8501"
+    volumes:
+      - .:/app
+      - ./data:/app/data
+      - ./.env:/app/.env
+    restart: unless-stopped
+    environment:
+      - PYTHONUNBUFFERED=1
