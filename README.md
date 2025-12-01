@@ -1,6 +1,6 @@
 # PandasAI Purchasing Chat
 
-An intelligent data analysis application tailored for purchasing data, powered by **Google Gemini 1.5 Flash** and **PandasAI**. This tool allows users to upload datasets, perform natural language queries, and automatically transform data for analysis.
+An intelligent data analysis application tailored for purchasing data, powered by **Google Gemini 2.5 Flash** and **PandasAI**. This tool allows users to upload datasets, perform natural language queries, and automatically transform data for analysis.
 
 ## Features
 
@@ -95,7 +95,7 @@ If you prefer to run it without Docker:
 ## Tech Stack
 
 -   **Frontend**: Streamlit
--   **AI Engine**: Google Gemini 1.5 Flash (via `google-genai` SDK)
+-   **AI Engine**: Google Gemini 2.5 Flash (via `google-genai` SDK)
 -   **Data Processing**: Pandas, PandasAI
 -   **Database**: SQLite
 -   **Containerization**: Docker
