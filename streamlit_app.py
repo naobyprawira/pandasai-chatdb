@@ -629,11 +629,49 @@ with tab_onedrive:
                                         with st.expander("Lihat kode Python", expanded=False):
                                             st.code(result.transform_code, language="python")
                                         
+                                        # Preview
+                                        st.subheader("👁️ Preview Hasil")
+                                        fresh_preview_df, exec_error = execute_transform(df_raw.head(100).copy(), result.transform_code)
+                                        
+                                        if exec_error:
+                                            st.error(f"Error preview: {exec_error}")
+                                        else:
+                                            st.dataframe(fresh_preview_df.head(20), use_container_width=True)
+                                            
+                                            # Feedback Loop
+                                            st.divider()
+                                            st.subheader("🔧 Perbaiki Transformasi")
+                                            st.caption("Jika hasil belum sesuai, berikan feedback untuk diperbaiki AI.")
+                                            
+                                            feedback = st.text_area(
+                                                "Feedback:",
+                                                placeholder="Contoh: Kolom tanggal masih salah format, atau kolom X harusnya dihapus.",
+                                                key="onedrive_feedback"
+                                            )
+                                            
+                                            if st.button("🛠️ Perbaiki dengan AI", key="regenerate_onedrive"):
+                                                if not feedback:
+                                                    st.warning("Silakan isi feedback terlebih dahulu.")
+                                                else:
+                                                    with st.spinner("🔄 Memperbaiki transformasi..."):
+                                                        new_result = regenerate_with_feedback(
+                                                            df=df_raw,
+                                                            previous_code=result.transform_code,
+                                                            user_feedback=feedback,
+                                                            filename=selected_file_name,
+                                                            sheet_name=selected_sheet,
+                                                            original_df=df_raw.head(50),
+                                                            transformed_df=fresh_preview_df.head(20)
+                                                        )
+                                                        st.session_state.onedrive_analysis = new_result
+                                                        st.rerun()
+                                        
                                         # Apply button
+                                        st.divider()
                                         if st.button("✅ Terapkan & Cache", key="od_apply_transform", type="primary"):
                                             with st.spinner("Menerapkan transformasi..."):
                                                 try:
-                                                    transformed_df, error = execute_transform(df_raw.copy(), result.transform_code)
+                                                    transformed_df, error = execute_transform(df_full.copy(), result.transform_code)
                                                     if error:
                                                         st.error(f"Error transformasi: {error}")
                                                     else:
@@ -844,10 +882,39 @@ with tab_upload:
                             # Preview
                             st.subheader("👁️ Preview Hasil")
                             fresh_preview_df, exec_error = execute_transform(df_raw.head(100).copy(), result.transform_code)
+                            
                             if exec_error:
                                 st.error(f"Error preview: {exec_error}")
                             else:
                                 st.dataframe(fresh_preview_df.head(20), use_container_width=True)
+                                
+                                # Feedback Loop
+                                st.divider()
+                                st.subheader("🔧 Perbaiki Transformasi")
+                                st.caption("Jika hasil belum sesuai, berikan feedback untuk diperbaiki AI.")
+                                
+                                feedback = st.text_area(
+                                    "Feedback:",
+                                    placeholder="Contoh: Kolom tanggal masih salah format, atau kolom X harusnya dihapus.",
+                                    key="upload_feedback"
+                                )
+                                
+                                if st.button("🛠️ Perbaiki dengan AI", key="regenerate_upload"):
+                                    if not feedback:
+                                        st.warning("Silakan isi feedback terlebih dahulu.")
+                                    else:
+                                        with st.spinner("🔄 Memperbaiki transformasi..."):
+                                            new_result = regenerate_with_feedback(
+                                                df=df_raw,
+                                                previous_code=result.transform_code,
+                                                user_feedback=feedback,
+                                                filename=record.display_name,
+                                                sheet_name=selected_sheet or "",
+                                                original_df=df_raw.head(50),
+                                                transformed_df=fresh_preview_df.head(20)
+                                            )
+                                            st.session_state.analysis_result = new_result
+                                            st.rerun()
                             
                             st.divider()
                             
