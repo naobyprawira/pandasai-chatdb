@@ -268,11 +268,19 @@ def _sanitize_df_for_display(df: pd.DataFrame) -> pd.DataFrame:
     if df is None:
         return None
     df = df.copy()
+    
+    # First, fill any actual NaNs with empty string
+    df = df.fillna("")
+    
     for col in df.columns:
         if df[col].dtype == 'object':
             try:
-                # Try to convert to string to avoid mixed type issues
+                # Convert to string to avoid mixed types
                 df[col] = df[col].astype(str)
+                # Replace "nan" string artifacts (case insensitive)
+                df[col] = df[col].replace(r'(?i)^nan$', "", regex=True)
+                df[col] = df[col].replace(r'(?i)^<na>$', "", regex=True)
+                df[col] = df[col].replace(r'(?i)^none$', "", regex=True)
             except Exception:
                 pass
     return df

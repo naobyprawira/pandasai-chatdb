@@ -131,9 +131,11 @@ def read_file_to_df(file_bytes: bytes, filename: str, sheet_name: Optional[str] 
         nrows: Optional - limit number of rows to read (for quick preview)
     """
     if filename.lower().endswith(".csv"):
-        return pd.read_csv(BytesIO(file_bytes), nrows=nrows)
+        df = pd.read_csv(BytesIO(file_bytes), nrows=nrows)
+        return df.fillna("")
     elif filename.lower().endswith((".xlsx", ".xls")):
-        return pd.read_excel(BytesIO(file_bytes), sheet_name=sheet_name or 0, nrows=nrows)
+        df = pd.read_excel(BytesIO(file_bytes), sheet_name=sheet_name or 0, nrows=nrows)
+        return df.fillna("")
     else:
         raise ValueError(f"Unsupported file: {filename}")
 
