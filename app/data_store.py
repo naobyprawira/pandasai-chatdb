@@ -91,6 +91,19 @@ class CachedSheetRecord:
     sheet_name: Optional[str]
     display_name: str
     n_rows: Optional[int]
+    n_cols: Optional[int]
+    cached_at: str
+    stored_path: str
+
+
+class DatasetCatalog:
+    """Simple SQLite-backed catalog for uploaded datasets."""
+
+    def __init__(self, db_path: Path = CATALOG_DB) -> None:
+        self.db_path = Path(db_path)
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._ensure_tables()
+
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
