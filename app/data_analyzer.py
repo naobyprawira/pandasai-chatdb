@@ -325,17 +325,14 @@ DILARANG KERAS:
 - df.dtype (gunakan df.dtypes)
 - File I/O apapun"""
 
-    response = client.chat.completions.create(
+    response = client.responses.create(
         model=settings.default_llm_model,
-        messages=[
-            {"role": "system", "content": system_instruction},
-            {"role": "user", "content": prompt}
-        ],
-        temperature=0.1,
-        max_tokens=1500,
+        instructions=system_instruction,
+        input=prompt,
+
     )
     
-    raw_response = response.choices[0].message.content
+    raw_response = response.output_text
     if not raw_response:
         return "df = df.copy()", "AI tidak memberikan response", [], False, ""
     
@@ -653,17 +650,14 @@ df = pd.DataFrame(rows)  # OK - reassign ke df
 Contoh SALAH:
 df_new = df.iloc[3:]  # SALAH - hasil di df_new, bukan df"""
 
-        response = client.chat.completions.create(
+        response = client.responses.create(
             model=settings.default_llm_model,
-            messages=[
-                {"role": "system", "content": system_instruction},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.1,
-            max_tokens=1000,
+            instructions=system_instruction,
+            input=prompt,
+    
         )
         
-        raw_response = response.choices[0].message.content
+        raw_response = response.output_text
         if not raw_response:
             return TransformResult(
                 summary="AI tidak memberikan response",

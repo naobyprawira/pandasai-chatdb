@@ -394,6 +394,7 @@ def _safe_exec(code: str, df: DataFrame) -> tuple[str, list]:
     mock_st = MockStreamlit()
     
     local_ns: dict[str, Any] = {
+        "__builtins__": __builtins__,
         "df": df.copy(),
         "pd": pd,
         "np": np,
@@ -407,7 +408,7 @@ def _safe_exec(code: str, df: DataFrame) -> tuple[str, list]:
     }
     try:
         with redirect_stdout(buf):
-            exec(code, {"__builtins__": __builtins__}, local_ns)  # noqa: S102
+            exec(code, local_ns)  # noqa: S102
     except KeyError as exc:
         # KeyError usually means column not found
         col_name = str(exc).strip("'\"")
@@ -443,50 +444,16 @@ class PandasAIClient:
         # Skip if result is too short (probably just a simple number already explained)
         if len(query_result.strip()) < 20 and "\n" not in query_result:
             return ""
-        
+
         try:
-            prompt = _EXPLAIN_PROMPT.format(
-                user_question=user_question,
-                query_result=query_result[:3000]  # Limit result size
-            )
-            
-            system_instruction = """Kamu adalah asisten analisis data yang smart dan informatif.
-
-TUGAS: Jelaskan hasil query dengan cara yang berguna untuk user.
-
-WAJIB:
-1. IDENTIFIKASI KONTEKS - mention identitas/konteks dari data (supplier mana, periode apa, kategori mana, dll)
-2. JAWAB PERTANYAAN USER - langsung jawab apa yang ditanya dengan data yang ada
-3. BERIKAN KONTEKS ANGKA - jika ada angka, jelaskan konteksnya (total? rata-rata? trend?)
-4. HIGHLIGHT INSIGHT - apa yang penting/menarik dari data (best/worst? naik/turun? abnormal?)
-5. BERIKAN REKOMENDASI - saran praktis jika relevan
-
-FORMAT:
-- Bullet points singkat dan clear
-- Include nama/identitas relevan (supplier, kategori, periode, dll)
-- Include angka spesifik dengan konteks
-- 2-5 poin informatif
-
-CONTOH BAIK:
-- "Top 3 supplier: ABC (Rp 50M), DEF (Rp 30M), GHI (Rp 20M) - ABC dominasi 50% total"
-- "Periode Apr-Jun 2025: naik signifikan dari Rp 5M jadi Rp 15M (3x growth)"
-- "Kategori X: 5 item dengan performa di bawah rata-rata - perlu review"
-
-Gunakan Bahasa Indonesia natural."""
-
-            response = self.client.chat.completions.create(
+            response = self.client.responses.create(
                 model=self.model_name,
-                messages=[
-                    {"role": "system", "content": system_instruction},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.3,
-                max_tokens=500,
+                instructions=_EXPLAIN_PROMPT,
+                input=f"PERTANYAAN USER: {user_question}\n\nHASIL QUERY:\n{query_result}",
             )
-            return response.choices[0].message.content or ""
+            return response.output_text
         except Exception as e:
-            # Don't fail the whole query if explanation fails
-            return f"(Gagal generate penjelasan: {e})"
+            return f"Gagal generate penjelasan: {str(e)}"
 
     def ask(self, df: DataFrame, prompt: str, explain: bool = True) -> QAResult:
         """
@@ -530,15 +497,13 @@ Gunakan Bahasa Indonesia natural."""
                     current_prompt = error_context
                 
                 # Generate code
-                response = self.client.chat.completions.create(
+                response = self.client.responses.create(
                     model=self.model_name,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": current_prompt}
-                    ],
-                    temperature=0.1,
+                    instructions=system_prompt,
+                    input=current_prompt,
                 )
-                raw_answer = response.choices[0].message.content or ""
+                
+                raw_answer = response.output_text
                 code = _extract_code(raw_answer)
                 print(f"[QA DEBUG] Generated code:\n{code[:200]}..." if len(code) > 200 else f"[QA DEBUG] Generated code:\n{code}")
                 result, st_components = _safe_exec(code, df)

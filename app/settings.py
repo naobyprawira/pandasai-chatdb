@@ -15,7 +15,7 @@ UPLOAD_DIR = BASE_DIR / "data" / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 CATALOG_DB = BASE_DIR / "data" / "catalog.db"
-DEFAULT_LLM_MODEL = os.getenv("PANDASAI_LLM_MODEL", "gpt-5.1-mini")
+DEFAULT_LLM_MODEL = os.getenv("PANDASAI_LLM_MODEL", "gpt-5-mini")
 UPLOAD_MAX_MB = int(os.getenv("UPLOAD_MAX_MB", 25))
 
 class AppSettings:
@@ -28,7 +28,7 @@ class AppSettings:
     upload_max_mb: int = UPLOAD_MAX_MB
     
     # Security
-    app_password: str = "admin123"
+    app_password: str = "cGFzc3dvcmQgcHVyY2hhc2luZw=="
     
     # API Keys
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
