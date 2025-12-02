@@ -426,12 +426,12 @@ def execute_transform(df: DataFrame, code: str) -> tuple[DataFrame, str]:
         
         result_df = None
         for var_name in ["df", "df_result", "df_new", "df_transformed", "df_melted", "df_final", "result"]:
-            if var_name in local_ns and isinstance(local_ns[var_name], DataFrame):
-                result_df = local_ns[var_name]
+            if var_name in global_ns and isinstance(global_ns[var_name], DataFrame):
+                result_df = global_ns[var_name]
                 break
         
         if result_df is None:
-            for var_name, var_value in local_ns.items():
+            for var_name, var_value in global_ns.items():
                 if isinstance(var_value, DataFrame) and var_name != "_":
                 # Check if it's a new dataframe or modified original
                     if var_name == "df" or (len(var_value) != len(df) or list(var_value.columns) != list(df.columns)):
@@ -439,7 +439,7 @@ def execute_transform(df: DataFrame, code: str) -> tuple[DataFrame, str]:
                         break
         
         if result_df is None:
-            result_df = local_ns.get("df", df)
+            result_df = global_ns.get("df", df)
         
         if not isinstance(result_df, DataFrame):
             return df, "Kode tidak menghasilkan DataFrame"
@@ -582,7 +582,8 @@ def regenerate_with_feedback(
     filename: str = "",
     sheet_name: str = "",
     original_df: DataFrame = None,
-    transformed_df: DataFrame = None
+    transformed_df: DataFrame = None,
+    previous_error: str = None
 ) -> TransformResult:
     """
     Regenerate transformation based on user feedback.
@@ -595,6 +596,7 @@ def regenerate_with_feedback(
         sheet_name: Sheet name for context
         original_df: Original sample before any transformation (for context)
         transformed_df: Current transformed preview (for context)
+        previous_error: Error message from previous execution (if any)
         
     Returns:
         TransformResult with new transformation based on feedback
@@ -625,6 +627,14 @@ def regenerate_with_feedback(
 HASIL TRANSFORMASI SAAT INI:
 {_dataframe_to_sample_text(transformed_df, 20)}
 """
+
+    # Add error context if available
+    error_context = ""
+    if previous_error:
+        error_context = f"""
+❌ ERROR PADA EKSEKUSI SEBELUMNYA:
+{previous_error}
+"""
     
     prompt = f"""Perbaiki kode transformasi berdasarkan feedback user.
 
@@ -637,7 +647,9 @@ KODE SEBELUMNYA:
 {previous_code}
 ```
 
-FEEDBACK: "{user_feedback}"
+{error_context}
+
+FEEDBACK USER: "{user_feedback}"
 
 RULES:
 ❌ JANGAN: pd.read_excel/csv, df.dtype, df[['a','b']] = split, melt(), pivot()

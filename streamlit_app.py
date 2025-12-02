@@ -694,7 +694,8 @@ with tab_onedrive:
                                                             filename=selected_file_name,
                                                             sheet_name=selected_sheet,
                                                             original_df=df_raw.head(50),
-                                                            transformed_df=fresh_preview_df.head(20)
+                                                            transformed_df=fresh_preview_df.head(20),
+                                                            previous_error=exec_error
                                                         )
                                                         st.session_state.onedrive_analysis = new_result
                                                         st.rerun()
@@ -944,7 +945,8 @@ with tab_upload:
                                                 filename=record.display_name,
                                                 sheet_name=selected_sheet or "",
                                                 original_df=df_raw.head(50),
-                                                transformed_df=fresh_preview_df.head(20)
+                                                transformed_df=fresh_preview_df.head(20),
+                                                previous_error=exec_error
                                             )
                                             st.session_state.analysis_result = new_result
                                             st.rerun()
