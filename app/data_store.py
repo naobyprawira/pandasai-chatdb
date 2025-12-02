@@ -1,4 +1,16 @@
+from __future__ import annotations
+
+import sqlite3
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Iterable, List, Optional
+from uuid import uuid4
+
 from .settings import CATALOG_DB
+from app.logger import setup_logger
+
+logger = setup_logger("data_store")
 
 _CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS datasets (
