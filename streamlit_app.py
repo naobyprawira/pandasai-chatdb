@@ -263,6 +263,21 @@ def add_message(role: str, content: str, table_name: str = None, code: str = Non
     })
 
 
+def _sanitize_df_for_display(df: pd.DataFrame) -> pd.DataFrame:
+    """Sanitize DataFrame for Streamlit display to avoid Arrow errors."""
+    if df is None:
+        return None
+    df = df.copy()
+    for col in df.columns:
+        if df[col].dtype == 'object':
+            try:
+                # Try to convert to string to avoid mixed type issues
+                df[col] = df[col].astype(str)
+            except Exception:
+                pass
+    return df
+
+
 def render_st_components(components: list):
     """Render captured Streamlit components."""
     for comp in components:
@@ -271,7 +286,7 @@ def render_st_components(components: list):
         if comp_type == "dataframe":
             data = comp.get("data")
             if data is not None:
-                st.dataframe(data, use_container_width=True)
+                st.dataframe(_sanitize_df_for_display(data), use_container_width=True)
                 total = comp.get("total_rows", len(data))
                 if total > len(data):
                     st.caption(f"Menampilkan {len(data)} dari {total} baris")
@@ -455,7 +470,7 @@ with tab_chat:
                     try:
                         preview_df = pd.read_parquet(selected_table.cache_path).head(5)
                         st.caption(f"Preview {selected_table.display_name}:")
-                        st.dataframe(preview_df, use_container_width=True)
+                        st.dataframe(_sanitize_df_for_display(preview_df), use_container_width=True)
                     except Exception as e:
                         st.error(f"Gagal memuat preview: {e}")
             
@@ -577,7 +592,7 @@ with tab_onedrive:
                             )
                             
                             st.subheader("📋 Preview Data")
-                            st.dataframe(df_raw.head(30), use_container_width=True)
+                            st.dataframe(_sanitize_df_for_display(df_raw.head(30)), use_container_width=True)
                             
                             # Quick analysis hints
                             quick = get_quick_analysis(df_raw.head(100))
@@ -646,7 +661,7 @@ with tab_onedrive:
                                         if exec_error:
                                             st.error(f"Error preview: {exec_error}")
                                         else:
-                                            st.dataframe(fresh_preview_df.head(20), use_container_width=True)
+                                            st.dataframe(_sanitize_df_for_display(fresh_preview_df.head(20)), use_container_width=True)
                                             
                                             # Feedback Loop
                                             st.divider()
@@ -811,7 +826,7 @@ with tab_upload:
             else:
                 # Show original data preview
                 st.subheader("📋 Preview Data")
-                st.dataframe(df_raw.head(30), use_container_width=True)
+                st.dataframe(_sanitize_df_for_display(df_raw.head(30)), use_container_width=True)
                 
                 # Quick analysis hints
                 quick_analysis = get_quick_analysis(df_raw)
@@ -896,7 +911,7 @@ with tab_upload:
                             if exec_error:
                                 st.error(f"Error preview: {exec_error}")
                             else:
-                                st.dataframe(fresh_preview_df.head(20), use_container_width=True)
+                                st.dataframe(_sanitize_df_for_display(fresh_preview_df.head(20)), use_container_width=True)
                                 
                                 # Feedback Loop
                                 st.divider()

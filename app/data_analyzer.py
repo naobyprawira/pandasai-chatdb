@@ -418,7 +418,11 @@ def execute_transform(df: DataFrame, code: str) -> tuple[DataFrame, str]:
             "datetime": datetime,
         }
         
-        exec(code, {"__builtins__": __builtins__}, local_ns)
+        # Merge globals and locals to ensure imports are available
+        global_ns = local_ns.copy()
+        global_ns["__builtins__"] = __builtins__
+        
+        exec(code, global_ns)
         
         result_df = None
         for var_name in ["df", "df_result", "df_new", "df_transformed", "df_melted", "df_final", "result"]:
