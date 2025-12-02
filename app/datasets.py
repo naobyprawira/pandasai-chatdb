@@ -255,7 +255,8 @@ def _read_dataframe_raw(path: Path, sheet_name: str | int | None = None, nrows: 
     suffix = path.suffix.lower()
     if suffix in {".csv", ".tsv", ".txt"}:
         sep = "\t" if suffix == ".tsv" else ","
-        return pd.read_csv(path, sep=sep, nrows=nrows)
+        df = pd.read_csv(path, sep=sep, nrows=nrows)
+        return df.fillna("")
     if suffix in {".xls", ".xlsx"}:
         # Read ALL columns (no usecols limit)
         # Use header=None initially to get ALL data including potential merged headers
@@ -265,7 +266,7 @@ def _read_dataframe_raw(path: Path, sheet_name: str | int | None = None, nrows: 
             nrows=nrows,
             # Don't skip any columns - read everything
         )
-        return df
+        return df.fillna("")
     raise ValueError(f"Unsupported file type: {suffix}")
 
 
