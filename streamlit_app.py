@@ -705,6 +705,12 @@ with tab_onedrive:
                                         if st.button("✅ Terapkan & Cache", key="od_apply_transform", type="primary"):
                                             with st.spinner("Menerapkan transformasi..."):
                                                 try:
+                                                    # Re-read full dataframe for application
+                                                    df_full = onedrive_client.read_file_to_df(
+                                                        st.session_state.onedrive_file_bytes,
+                                                        selected_file_name,
+                                                        selected_sheet
+                                                    )
                                                     transformed_df, error = execute_transform(df_full.copy(), result.transform_code)
                                                     if error:
                                                         st.error(f"Error transformasi: {error}")
@@ -718,6 +724,7 @@ with tab_onedrive:
                                                         st.success(f"✅ Berhasil! ({n_rows:,} baris)")
                                                         st.balloons()
                                                         st.session_state.onedrive_analysis = None
+                                                        st.rerun()
                                                 except Exception as e:
                                                     st.error(f"Gagal: {e}")
                             
