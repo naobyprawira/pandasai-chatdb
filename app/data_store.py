@@ -1,12 +1,3 @@
-from __future__ import annotations
-
-import sqlite3
-from dataclasses import dataclass
-from datetime import UTC, datetime
-from pathlib import Path
-from typing import Iterable, List, Optional
-from uuid import uuid4
-
 from .settings import CATALOG_DB
 
 _CREATE_TABLE_SQL = """
@@ -88,19 +79,6 @@ class CachedSheetRecord:
     sheet_name: Optional[str]
     display_name: str
     n_rows: Optional[int]
-    n_cols: Optional[int]
-    cached_at: str
-    stored_path: str
-
-
-class DatasetCatalog:
-    """Simple SQLite-backed catalog for uploaded datasets."""
-
-    def __init__(self, db_path: Path = CATALOG_DB) -> None:
-        self.db_path = Path(db_path)
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._ensure_tables()
-
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
@@ -206,6 +184,7 @@ class DatasetCatalog:
                 """,
                 (cache_id, dataset_id, owner_id, sheet_name, display_name, n_rows, n_cols, cached_at),
             )
+        logger.info(f"Created cache for dataset {dataset_id}, sheet {sheet_name} (ID: {cache_id})")
         return cache_id
 
     def list_cached_sheets(self, owner_id: str) -> List[CachedSheetRecord]:

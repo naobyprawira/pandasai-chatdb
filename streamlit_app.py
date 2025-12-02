@@ -37,8 +37,12 @@ from app.data_analyzer import (
     regenerate_with_feedback,
     TransformResult,
 )
+from app.logger import setup_logger
 
+logger = setup_logger("streamlit_app")
 settings = AppSettings()
+
+logger.info("Application starting...")
 
 st.set_page_config(page_title="Purchasing Data Assistant", layout="wide", page_icon="🛍️")
 
@@ -179,8 +183,10 @@ def check_password():
                 env_pass = os.environ.get("APP_PASSWORD", "admin123")
                 if password == env_pass:
                     st.session_state.authenticated = True
+                    logger.info(f"User {st.session_state.user_id} logged in successfully")
                     st.rerun()
                 else:
+                    logger.warning(f"Failed login attempt for user {st.session_state.user_id}")
                     st.error("😕 Password salah")
     
     return False
@@ -218,6 +224,7 @@ with st.sidebar:
         
     st.divider()
     if st.button("🔒 Logout", use_container_width=True):
+        logger.info(f"User {st.session_state.user_id} logged out")
         st.session_state.authenticated = False
         st.rerun()
 
@@ -312,6 +319,7 @@ def process_question(question: str, table: CachedDataInfo):
         return
     
     try:
+        logger.info(f"Processing question for table '{table.display_name}': {question}")
         df = pd.read_parquet(table.cache_path)
         client = PandasAIClient(api_key=api_key)
         result = client.ask(df, question)
@@ -343,6 +351,8 @@ def process_question(question: str, table: CachedDataInfo):
         else:
             error_msg = str(e)
         # Log full traceback for debugging
+        logger.error(f"Exception in process_question: {error_type}: {e}")
+        logger.error(f"Traceback:\n{traceback.format_exc()}")
         print(f"[DEBUG] Exception in process_question: {error_type}: {e}")
         print(f"[DEBUG] Traceback:\n{traceback.format_exc()}")
         add_message("assistant", f"❌ Error ({error_type}): {error_msg}")

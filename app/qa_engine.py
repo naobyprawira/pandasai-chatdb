@@ -9,10 +9,13 @@ from typing import Any, List
 
 import pandas as pd
 from pandas import DataFrame
+from openai import OpenAI
 
 from .settings import AppSettings
+from app.logger import setup_logger
 
 settings = AppSettings()
+logger = setup_logger("qa_engine")
 
 
 @dataclass
@@ -117,7 +120,7 @@ st.dataframe(result, use_container_width=True)
 # Context: Period
 # Jawaban: Sales/Revenue
 # Supporting: Trend info
-monthly = df.groupby('Period').agg({{'Sales': 'sum'}}).reset_index()
+monthly = df.groupby('Period').agg({'Sales': 'sum'}).reset_index()
 monthly = monthly.sort_values('Sales', ascending=False)
 st.dataframe(monthly.head(12), use_container_width=True)
 ```
@@ -221,117 +224,65 @@ def _fuzzy_match(series: pd.Series, query: str, threshold: int = 85) -> pd.Serie
     Matching priority:
     1. Exact substring: "DONG JIN" in "DONG JIN TEXTILE CO" -> match
     2. All query words present: "JIN DONG" matches "DONG JIN TEXTILE" -> match  
-    3. Fuzzy on query as whole: "DONGG JIN" (typo) matches "DONG JIN" -> match
-    
-    Does NOT match just because they share a common word like "TEXTILE".
+    3. Fuzzy match: "DONGJIN" matches "DONG JIN" -> match
     """
-    from rapidfuzz import fuzz
+    import re
     
-    query_lower = query.lower().strip()
-    query_tokens = query_lower.split()
+    # Normalize query
+    query = str(query).upper().strip()
+    query_words = set(re.findall(r'\w+', query))
     
-    def score(val):
+    if not query_words:
+        return pd.Series([False] * len(series), index=series.index)
+    
+    def check_match(val):
         if pd.isna(val):
             return False
-        val_str = str(val).lower().strip()
+        val_str = str(val).upper()
         
-        # Strategy 1: Query is substring of value (exact partial match)
-        # "dong jin" in "dong jin textile co ltd" → True
-        if query_lower in val_str:
+        # 1. Exact substring check (fastest)
+        if query in val_str:
             return True
-        
-        # Strategy 2: All query tokens exist in value tokens
-        # "dong jin" → both "dong" and "jin" must be in value
-        val_tokens = val_str.split()
-        if query_tokens and all(qt in val_tokens for qt in query_tokens):
+            
+        # 2. All words check (order independent)
+        val_words = set(re.findall(r'\w+', val_str))
+        if query_words.issubset(val_words):
             return True
-        
-        # Strategy 3: Fuzzy match the ENTIRE query against the START of value
-        # This handles typos like "DONGG JIN" matching "DONG JIN TEXTILE"
-        # Only check beginning portion of value (same length as query + some buffer)
-        val_prefix = val_str[:len(query_lower) + 10]
-        if fuzz.ratio(query_lower, val_prefix) >= threshold:
+            
+        # 3. Fuzzy check (slower, only if needed)
+        # Simple fuzzy: check if query without spaces is in value without spaces
+        query_nospace = query.replace(" ", "")
+        val_nospace = val_str.replace(" ", "")
+        if query_nospace in val_nospace:
             return True
-        
-        # Strategy 4: Check if each query token fuzzy-matches any value token
-        # Handles typos in individual words
-        matched_tokens = 0
-        for qt in query_tokens:
-            for vt in val_tokens:
-                if fuzz.ratio(qt, vt) >= threshold:
-                    matched_tokens += 1
-                    break
-        if query_tokens and matched_tokens == len(query_tokens):
-            return True
-        
+            
         return False
-    
-    return series.apply(score)
+
+    return series.apply(check_match)
 
 
-def _safe_exec(code: str, df: DataFrame) -> tuple[str, list]:
-    """Execute code in a sandboxed namespace and capture stdout + streamlit components.
-    
-    Returns:
-        tuple: (stdout_output, list of streamlit components to render)
+def _safe_exec(code: str, df: DataFrame) -> tuple[str, List[dict]]:
     """
-    # Check if AI tried to create new DataFrame (common mistake)
-    bad_patterns = [
-        "pd.DataFrame({",
-        "pd.DataFrame(data",
-        "data = {",
-        "df = pd.read_",
-    ]
-    for pattern in bad_patterns:
-        if pattern in code:
-            return f"⚠️ Error: Kode mencoba membuat DataFrame baru. Variable `df` sudah berisi data lengkap ({len(df)} baris). Silakan coba lagi.", []
-    
-    # Import modules that AI might use
-    from fuzzywuzzy import fuzz as fuzzywuzzy_fuzz
-    from rapidfuzz import fuzz as rapidfuzz_fuzz
+    Execute generated code safely and capture output.
+    Returns: (output_string, list_of_streamlit_components)
+    """
+    import io
+    import pandas as pd
     import numpy as np
     import re as re_module
     import datetime
+    from fuzzywuzzy import fuzz as fuzzywuzzy_fuzz
     
     buf = io.StringIO()
-    
-    def _sanitize_df_for_display(df_to_sanitize: DataFrame) -> DataFrame:
-        """
-        Sanitize DataFrame to prevent Arrow conversion errors.
-        Converts mixed-type columns (especially datetime/object mix) to strings.
-        """
-        result = df_to_sanitize.copy()
-        for col in result.columns:
-            # Check if column has mixed types that could cause Arrow issues
-            try:
-                col_dtype = result[col].dtype
-                if col_dtype == 'object':
-                    # Check if column contains any datetime objects
-                    sample = result[col].dropna().head(100)
-                    has_datetime = any(isinstance(x, (datetime.datetime, datetime.date)) for x in sample)
-                    if has_datetime:
-                        # Convert entire column to string to avoid Arrow issues
-                        result[col] = result[col].astype(str)
-            except Exception:
-                # If any error, convert to string as fallback
-                try:
-                    result[col] = result[col].astype(str)
-                except:
-                    pass
-        return result
-    
-    # Capture Streamlit components
     st_components = []
     
+    # Mock streamlit to capture output
     class MockStreamlit:
-        """Mock Streamlit module to capture component calls."""
-        
-        def dataframe(self, data, use_container_width=True, **kwargs):
-            """Capture dataframe call - limit to 50 rows."""
+        def dataframe(self, data, use_container_width=False, **kwargs):
+            """Capture dataframe display."""
             if isinstance(data, DataFrame):
-                display_df = data.head(50).copy()
-                # Sanitize to prevent Arrow conversion errors
-                display_df = _sanitize_df_for_display(display_df)
+                # Sanitize for display (handle non-serializable types)
+                display_df = _sanitize_df_for_display(data.head(50).copy())
                 st_components.append({
                     "type": "dataframe",
                     "data": display_df,
@@ -421,7 +372,19 @@ def _safe_exec(code: str, df: DataFrame) -> tuple[str, list]:
     return output if output.strip() else "", st_components
 
 
-from openai import OpenAI
+def _sanitize_df_for_display(df: DataFrame) -> DataFrame:
+    """Convert non-serializable columns to string for display."""
+    for col in df.columns:
+        # Check if column has complex types (lists, dicts, objects)
+        if df[col].dtype == 'object':
+            try:
+                # Try to see if it's safe
+                df[col].head(1).to_json()
+            except:
+                # If not serializable, convert to string
+                df[col] = df[col].astype(str)
+    return df
+
 
 class PandasAIClient:
     """Wrapper that asks the LLM to generate pandas code, then executes it."""
@@ -476,10 +439,10 @@ class PandasAIClient:
         system_prompt = _build_system_prompt(df)
         last_failed_code = ""
         
-        print(f"[QA DEBUG] Starting ask() with prompt: {prompt[:50]}...")
+        logger.info(f"Starting ask() with prompt: {prompt[:50]}...")
         
         for iteration in range(1, MAX_ITERATIONS + 1):
-            print(f"[QA DEBUG] === Iteration {iteration}/{MAX_ITERATIONS} ===")
+            logger.info(f"=== Iteration {iteration}/{MAX_ITERATIONS} ===")
             try:
                 # Build messages with error context if retry
                 current_prompt = prompt
@@ -505,14 +468,14 @@ class PandasAIClient:
                 
                 raw_answer = response.output_text
                 code = _extract_code(raw_answer)
-                print(f"[QA DEBUG] Generated code:\n{code[:200]}..." if len(code) > 200 else f"[QA DEBUG] Generated code:\n{code}")
+                logger.info(f"Generated code:\n{code[:200]}..." if len(code) > 200 else f"Generated code:\n{code}")
                 result, st_components = _safe_exec(code, df)
                 
                 # Check if execution successful (no error)
                 # Handle None/empty result safely
                 result_str = result if result else ""
                 has_error = "❌ Error" in result_str or "Execution error" in result_str
-                print(f"[QA DEBUG] Execution result: has_error={has_error}, result_preview={result_str[:100]}..." if len(result_str) > 100 else f"[QA DEBUG] Execution result: has_error={has_error}, result={result_str}")
+                logger.info(f"Execution result: has_error={has_error}, result_preview={result_str[:100]}..." if len(result_str) > 100 else f"Execution result: has_error={has_error}, result={result_str}")
                 
                 if not has_error:
                     # Success! Build explanation and return
@@ -553,6 +516,7 @@ class PandasAIClient:
                         )
                     except Exception as build_err:
                         # Error building explanation - still return result without explanation
+                        logger.error(f"Failed to build explanation: {build_err}")
                         validation_notes.append(f"Iterasi {iteration}: Gagal build explanation - {build_err}")
                         return QAResult(
                             prompt=prompt,
@@ -575,7 +539,7 @@ class PandasAIClient:
                     
                     # If last iteration, return error result
                     if iteration == MAX_ITERATIONS:
-                        print(f"[QA DEBUG] Max iterations reached, returning error")
+                        logger.error(f"Max iterations reached, returning error")
                         return QAResult(
                             prompt=prompt,
                             response=result + f"\n\n(Sudah dicoba {MAX_ITERATIONS}x - masih error)",
@@ -588,12 +552,13 @@ class PandasAIClient:
                             validation_notes=validation_notes
                         )
                     # Continue to next iteration
-                    print(f"[QA DEBUG] Continuing to iteration {iteration + 1}")
+                    logger.info(f"Continuing to iteration {iteration + 1}")
                     last_failed_code = code  # Track failed code
                     continue
                     
             except Exception as e:
                 # Unexpected exception (similar to Data Analyzer)
+                logger.error(f"Unexpected exception in ask(): {e}")
                 validation_notes.append(f"Iterasi {iteration}: Exception - {str(e)}")
                 error_entry = {
                     "iteration": iteration,

@@ -13,8 +13,10 @@ import pandas as pd
 from pandas import DataFrame
 
 from .settings import AppSettings
+from app.logger import setup_logger
 
 settings = AppSettings()
+logger = setup_logger("data_analyzer")
 
 # Maximum rows for sample
 MAX_SAMPLE_ROWS = 30
@@ -471,6 +473,8 @@ def analyze_and_generate_transform(
     error_history = []
     last_failed_code = ""
     
+    logger.info(f"Starting analysis for file: {filename}, sheet: {sheet_name}")
+    
     for iteration in range(1, MAX_ITERATIONS + 1):
         try:
             code, summary, issues, needs_transform, failed_code = _generate_transform_code(
@@ -479,6 +483,7 @@ def analyze_and_generate_transform(
             )
             
             if failed_code:
+                logger.warning(f"Iteration {iteration}: Dangerous code detected")
                 validation_notes.append(f"Iterasi {iteration}: ❌ Kode berbahaya")
                 error_history.append({"iteration": iteration, "error": "Dangerous code", "code": failed_code})
                 previous_issues = ["Kode berbahaya detected"]
@@ -487,6 +492,7 @@ def analyze_and_generate_transform(
                 continue
             
             if not needs_transform:
+                logger.info("Analysis complete: No transformation needed")
                 return TransformResult(
                     summary=summary,
                     issues_found=issues,
@@ -502,6 +508,7 @@ def analyze_and_generate_transform(
             transformed_df, error = execute_transform(sample_df, code)
             
             if error:
+                logger.warning(f"Iteration {iteration}: Execution error: {error}")
                 validation_notes.append(f"Iterasi {iteration}: Error eksekusi - {error}")
                 error_history.append({"iteration": iteration, "error": error, "code": code})
                 previous_issues = [f"Error: {error}"]
@@ -513,6 +520,7 @@ def analyze_and_generate_transform(
             if transformed_df is not None and transformed_df.columns.duplicated().any():
                 dup_cols = transformed_df.columns[transformed_df.columns.duplicated()].tolist()
                 error = f"Duplicate columns: {dup_cols[:5]}"
+                logger.warning(f"Iteration {iteration}: {error}")
                 validation_notes.append(f"Iterasi {iteration}: {error}")
                 error_history.append({"iteration": iteration, "error": error, "code": code})
                 previous_issues = [error]
@@ -524,6 +532,7 @@ def analyze_and_generate_transform(
             critical_issues = [i for i in comparison_issues if i.startswith("❌")]
             
             if critical_issues:
+                logger.warning(f"Iteration {iteration}: Validation failed: {critical_issues}")
                 validation_notes.append(f"Iterasi {iteration}: Validation failed - {critical_issues}")
                 error_history.append({"iteration": iteration, "error": str(critical_issues), "code": code})
                 previous_issues = critical_issues
@@ -531,6 +540,7 @@ def analyze_and_generate_transform(
                 last_failed_code = code
                 continue
             
+            logger.info("Analysis complete: Transformation generated successfully")
             return TransformResult(
                 summary=summary,
                 issues_found=issues,
@@ -543,9 +553,11 @@ def analyze_and_generate_transform(
             )
             
         except Exception as e:
+            logger.error(f"Iteration {iteration}: Unexpected exception: {e}")
             validation_notes.append(f"Iterasi {iteration}: Exception - {str(e)}")
             previous_issues = [str(e)]
             
+    logger.error("Analysis failed after max iterations")
     return TransformResult(
         summary="Gagal setelah max iterations",
         issues_found=previous_issues or [],
