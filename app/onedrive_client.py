@@ -105,6 +105,17 @@ def list_files(token: str) -> List[dict]:
     return results
 
 
+def get_file_details(token: str, file_id: str) -> dict:
+    """Get file details by ID (useful for refreshing download URL)."""
+    drive_id = config.ONEDRIVE_DRIVE_ID
+    url = f"{config.GRAPH_BASE_URL}/drives/{drive_id}/items/{file_id}"
+    
+    try:
+        return _graph_get(url, token)
+    except Exception:
+        return {}
+
+
 def download_file(download_url: str) -> bytes:
     """Download file bytes."""
     resp = requests.get(download_url, timeout=300)

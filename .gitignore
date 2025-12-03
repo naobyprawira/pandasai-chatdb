@@ -14,3 +14,6 @@ uploads/
 # IDE
 .vscode/
 .idea/
+
+# Logs
+logs/

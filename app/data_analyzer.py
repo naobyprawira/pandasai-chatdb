@@ -13,10 +13,10 @@ import pandas as pd
 from pandas import DataFrame
 
 from .settings import AppSettings
-from app.logger import setup_logger
+from app.logger import get_transform_logger
 
 settings = AppSettings()
-logger = setup_logger("data_analyzer")
+logger = get_transform_logger()
 
 # Maximum rows for sample
 MAX_SAMPLE_ROWS = 30

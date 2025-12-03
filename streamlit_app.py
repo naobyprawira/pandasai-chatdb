@@ -4,6 +4,9 @@ Chat-based UI with table selection popup, OneDrive integration, and Indonesian e
 """
 from __future__ import annotations
 
+from app.logger import get_app_logger
+logger = get_app_logger()
+
 import streamlit as st
 import pandas as pd
 from pathlib import Path
@@ -37,9 +40,7 @@ from app.data_analyzer import (
     regenerate_with_feedback,
     TransformResult,
 )
-from app.logger import setup_logger
 
-logger = setup_logger("streamlit_app")
 settings = AppSettings()
 
 logger.info("Application starting...")
@@ -57,6 +58,11 @@ def inject_custom_css():
         html, body, [class*="css"] {
             font-family: 'Inter', sans-serif;
         }
+
+        /* Hide Streamlit Branding */
+        #MainMenu {visibility: hidden;}
+        .stAppDeployButton {visibility: hidden;}
+        footer {visibility: hidden;}
         
         .stApp {
             background-color: var(--background-color);
@@ -152,6 +158,16 @@ def init_session_state():
         st.session_state.original_df = None
     if "selected_transforms" not in st.session_state:
         st.session_state.selected_transforms = []
+    if "flash_message" not in st.session_state:
+        st.session_state.flash_message = None
+
+def reset_onedrive_state():
+    """Reset OneDrive tab state to initial."""
+    st.session_state.onedrive_files = []
+    st.session_state.onedrive_file_bytes = None
+    st.session_state.onedrive_sheets = []
+    st.session_state.onedrive_analysis = None
+    st.session_state.onedrive_preview_df = None
 
 init_session_state()
 catalog = DatasetCatalog()
@@ -170,6 +186,8 @@ def check_password():
     
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
+        env_pass = os.environ.get("APP_PASSWORD", "admin123")
+        logger.info(f"DEBUG: Expected password is '{env_pass}'")
         with st.form("login_form"):
             password = st.text_input(
                 "Password", 
@@ -418,7 +436,8 @@ def handle_transform_upload(stored_path, selected_sheet, result, display_name, r
 st.title("💬 Purchasing Data Assistant")
 
 # Tabs
-tab_chat, tab_onedrive, tab_upload = st.tabs(["💬 Chat", "☁️ OneDrive", "⬆️ Upload File"])
+# Tabs
+tab_chat, tab_onedrive, tab_upload, tab_manage = st.tabs(["💬 Chat", "☁️ OneDrive", "⬆️ Upload File", "🛠️ Manage Tables"])
 
 # =============================================================================
 # TAB 1: Chat
@@ -533,6 +552,11 @@ with tab_onedrive:
         st.warning(f"☁️ OneDrive tidak dikonfigurasi: {onedrive_err}")
         st.info("Hubungi admin untuk konfigurasi integrasi OneDrive.")
     else:
+        # Show flash message if exists
+        if st.session_state.flash_message:
+            st.success(st.session_state.flash_message)
+            st.session_state.flash_message = None
+            
         st.subheader(f"📂 File dari: {onedrive_config.ONEDRIVE_ROOT_PATH}")
         
         col1, col2 = st.columns([1, 4])
@@ -719,11 +743,19 @@ with tab_onedrive:
                                                             transformed_df,
                                                             display_name=f"{display_name} (transformed)",
                                                             original_file=selected_file_name,
-                                                            sheet_name=selected_sheet
+                                                            sheet_name=selected_sheet,
+                                                            transform_code=result.transform_code,
+                                                            source_metadata={
+                                                                "source": "onedrive",
+                                                                "file_id": selected_file["id"],
+                                                                "file_path": selected_file["path"],
+                                                                "download_url": selected_file.get("downloadUrl"),
+                                                                "webUrl": selected_file.get("webUrl"),
+                                                            }
                                                         )
-                                                        st.success(f"✅ Berhasil! ({n_rows:,} baris)")
+                                                        st.session_state.flash_message = f"✅ Berhasil! Tabel '{display_name}' ({n_rows:,} baris) telah di-cache."
                                                         st.balloons()
-                                                        st.session_state.onedrive_analysis = None
+                                                        reset_onedrive_state()
                                                         st.rerun()
                                                 except Exception as e:
                                                     st.error(f"Gagal: {e}")
@@ -738,12 +770,24 @@ with tab_onedrive:
                                             f.write(st.session_state.onedrive_file_bytes)
                                         
                                         cache_path, n_rows, n_cols = build_parquet_cache(
-                                            temp_path, selected_sheet, display_name=display_name
+                                            temp_path, 
+                                            selected_sheet, 
+                                            display_name=display_name,
+                                            source_metadata={
+                                                "source": "onedrive",
+                                                "file_id": selected_file["id"],
+                                                "file_path": selected_file["path"],
+                                                "download_url": selected_file.get("downloadUrl"),
+                                                "webUrl": selected_file.get("webUrl"),
+                                            }
                                         )
                                         
                                         temp_path.unlink(missing_ok=True)
-                                        st.success(f"✅ '{display_name}' ({n_rows:,} baris) siap!")
+                                        temp_path.unlink(missing_ok=True)
+                                        st.session_state.flash_message = f"✅ Berhasil! Tabel '{display_name}' ({n_rows:,} baris) telah di-cache."
                                         st.balloons()
+                                        reset_onedrive_state()
+                                        st.rerun()
                                     except Exception as e:
                                         st.error(f"Gagal: {e}")
                         
@@ -762,11 +806,22 @@ with tab_onedrive:
                                     f.write(file_bytes)
                                 
                                 cache_path, n_rows, n_cols = build_parquet_cache(
-                                    temp_path, None, display_name=display_name
+                                    temp_path, 
+                                    None, 
+                                    display_name=display_name,
+                                    source_metadata={
+                                        "source": "onedrive",
+                                        "file_id": selected_file["id"],
+                                        "file_path": selected_file["path"],
+                                        "download_url": selected_file.get("downloadUrl"),
+                                    }
                                 )
                                 temp_path.unlink(missing_ok=True)
-                                st.success(f"✅ '{display_name}' ({n_rows:,} baris) siap!")
+                                temp_path.unlink(missing_ok=True)
+                                st.session_state.flash_message = f"✅ Berhasil! Tabel '{display_name}' ({n_rows:,} baris) telah di-cache."
                                 st.balloons()
+                                reset_onedrive_state()
+                                st.rerun()
                             except Exception as e:
                                 st.error(f"Gagal: {e}")
 
@@ -965,3 +1020,171 @@ with tab_upload:
 
         except Exception as e:
             st.error(f"Error processing file: {e}")
+
+
+# =============================================================================
+# TAB 4: Manage Tables
+# =============================================================================
+
+with tab_manage:
+    st.subheader("🛠️ Kelola Tabel Tersimpan")
+    
+    cached_list = list_all_cached_data()
+    
+    if not cached_list:
+        st.info("Belum ada tabel yang tersimpan.")
+    else:
+        # Dropdown for selection
+        table_options = ["-- Pilih Tabel --"] + [f"{t.display_name} ({t.n_rows:,} baris)" for t in cached_list]
+        selected_option = st.selectbox("Pilih tabel untuk dikelola:", table_options, key="manage_table_select")
+        
+        if selected_option != "-- Pilih Tabel --":
+            # Find selected table
+            selected_idx = table_options.index(selected_option) - 1
+            table = cached_list[selected_idx]
+            
+            st.divider()
+            st.markdown(f"### 📊 {table.display_name}")
+            
+            col_info, col_actions = st.columns([2, 1])
+            
+            with col_info:
+                source_display = f"`{table.original_file}`"
+                if table.source_metadata and table.source_metadata.get("webUrl"):
+                    source_display = f"[{table.original_file}]({table.source_metadata.get('webUrl')})"
+                
+                st.markdown(f"""
+                - **File Asli:** {source_display}
+                - **Sheet:** `{table.sheet_name or '-'}`
+                - **Dimensi:** {table.n_rows:,} baris x {table.n_cols} kolom
+                - **Ukuran:** {table.file_size_mb} MB
+                - **Di-cache:** {table.cached_at}
+                """)
+                
+                if table.source_metadata:
+                    st.caption(f"Source: {table.source_metadata.get('source', 'Unknown')}")
+                    if table.transform_code:
+                        st.caption("✅ Menggunakan transformasi custom")
+                
+                # Preview
+                try:
+                    preview_df = pd.read_parquet(table.cache_path).head(10)
+                    st.caption("Preview Data:")
+                    st.dataframe(_sanitize_df_for_display(preview_df), use_container_width=True)
+                except Exception as e:
+                    st.error(f"Gagal memuat preview: {e}")
+
+            with col_actions:
+                st.markdown("#### Aksi")
+                
+                # RESYNC BUTTON (OneDrive only)
+                if table.source_metadata and table.source_metadata.get("source") == "onedrive":
+                    if st.button("🔄 Resync Data", key=f"sync_{table.cache_path.stem}", use_container_width=True):
+                        with st.spinner("Resyncing data..."):
+                            try:
+                                meta = table.source_metadata
+                                token = onedrive_client.get_access_token()
+                                
+                                # Get fresh download URL
+                                details = onedrive_client.get_file_details(token, meta["file_id"])
+                                if not details or "id" not in details:
+                                    st.error("File tidak ditemukan di OneDrive (mungkin sudah dihapus/dipindah).")
+                                else:
+                                    download_url = details.get("@microsoft.graph.downloadUrl")
+                                    file_bytes = onedrive_client.download_file(download_url)
+                                    
+                                    # Re-process
+                                    if table.transform_code:
+                                        df_full = onedrive_client.read_file_to_df(
+                                            file_bytes, 
+                                            table.original_file, 
+                                            meta.get("sheet_name")
+                                        )
+                                        transformed_df, error = execute_transform(df_full, table.transform_code)
+                                        
+                                        if error:
+                                            st.error(f"Transform error: {error}")
+                                        else:
+                                            build_parquet_cache_from_df(
+                                                transformed_df,
+                                                display_name=table.display_name,
+                                                original_file=table.original_file,
+                                                sheet_name=meta.get("sheet_name"),
+                                                transform_code=table.transform_code,
+                                                source_metadata=meta
+                                            )
+                                            st.success("✅ Resync berhasil!")
+                                            time.sleep(1)
+                                            st.rerun()
+                                    else:
+                                        # Direct cache (no transform)
+                                        suffix = Path(table.original_file).suffix
+                                        temp_path = PARQUET_CACHE_DIR / f"_resync_{st.session_state.user_id}{suffix}"
+                                        with open(temp_path, "wb") as f:
+                                            f.write(file_bytes)
+                                        
+                                        build_parquet_cache(
+                                            temp_path,
+                                            meta.get("sheet_name"),
+                                            display_name=table.display_name,
+                                            source_metadata=meta
+                                        )
+                                        temp_path.unlink(missing_ok=True)
+                                        st.success("✅ Resync berhasil!")
+                                        time.sleep(1)
+                                        st.rerun()
+                                        
+                            except Exception as e:
+                                st.error(f"Resync gagal: {e}")
+
+                # EDIT BUTTON (OneDrive + Transform only)
+                if table.source_metadata and table.source_metadata.get("source") == "onedrive" and table.transform_code:
+                    if st.button("✏️ Edit Transformasi", key=f"edit_{table.cache_path.stem}", use_container_width=True):
+                        # Load data into session state for OneDrive tab
+                        try:
+                            meta = table.source_metadata
+                            token = onedrive_client.get_access_token()
+                            details = onedrive_client.get_file_details(token, meta["file_id"])
+                            download_url = details.get("@microsoft.graph.downloadUrl")
+                            file_bytes = onedrive_client.download_file(download_url)
+                            
+                            st.session_state.onedrive_file_bytes = file_bytes
+                            # Reconstruct file entry with all necessary metadata
+                            st.session_state.onedrive_files = [{
+                                "name": table.original_file, 
+                                "path": meta.get("file_path", table.original_file), 
+                                "id": meta["file_id"], 
+                                "downloadUrl": download_url, 
+                                "webUrl": meta.get("webUrl"),
+                                "size": 0
+                            }] 
+                            
+                            # Reconstruct TransformResult
+                            df_raw = onedrive_client.read_file_to_df(file_bytes, table.original_file, meta.get("sheet_name"), nrows=100)
+                            
+                            # Execute current transform for preview
+                            transformed_df, _ = execute_transform(df_raw.copy(), table.transform_code)
+                            
+                            st.session_state.onedrive_analysis = TransformResult(
+                                summary="Loaded from cache for editing",
+                                issues_found=[],
+                                transform_code=table.transform_code,
+                                needs_transform=True,
+                                preview_df=transformed_df.head(20),
+                                original_df=df_raw.head(50),
+                                validation_notes=["Loaded for editing"]
+                            )
+                            
+                            st.session_state.flash_message = f"✏️ Mode Edit: {table.display_name}. Silakan buka tab OneDrive."
+                            st.rerun()
+                            
+                        except Exception as e:
+                            st.error(f"Gagal memuat untuk edit: {e}")
+
+                # DELETE BUTTON
+                st.write("") # Spacer
+                if st.button("🗑️ Hapus Tabel", key=f"del_{table.cache_path.stem}", type="primary", use_container_width=True):
+                    if delete_cached_data(table.cache_path):
+                        st.success("Terhapus!")
+                        time.sleep(1)
+                        st.rerun()

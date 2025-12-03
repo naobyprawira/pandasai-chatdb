@@ -12,10 +12,10 @@ from pandas import DataFrame
 from openai import OpenAI
 
 from .settings import AppSettings
-from app.logger import setup_logger
+from app.logger import get_chat_logger
 
 settings = AppSettings()
-logger = setup_logger("qa_engine")
+logger = get_chat_logger()
 
 
 @dataclass

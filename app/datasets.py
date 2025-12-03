@@ -38,6 +38,8 @@ class CachedDataInfo:
     n_cols: int
     cached_at: str
     file_size_mb: float
+    transform_code: Optional[str] = None
+    source_metadata: Optional[dict] = None
 
 
 def _load_cache_metadata() -> dict:
@@ -85,6 +87,8 @@ def list_all_cached_data() -> List[CachedDataInfo]:
             n_cols=n_cols,
             cached_at=cached_at,
             file_size_mb=round(file_size_mb, 2),
+            transform_code=info.get("transform_code"),
+            source_metadata=info.get("source_metadata"),
         ))
     
     # Sort by cached date, newest first
@@ -135,7 +139,8 @@ def has_parquet_cache(path: Path, sheet_name: str | int | None = None) -> bool:
 def build_parquet_cache(
     path: Path, 
     sheet_name: str | int | None = None,
-    display_name: str | None = None
+    display_name: str | None = None,
+    source_metadata: dict | None = None
 ) -> Tuple[Path, int, int]:
     """Build parquet cache for a file/sheet if it doesn't exist.
     
@@ -172,7 +177,9 @@ def build_parquet_cache(
         "original_file": str(path.name),
         "sheet_name": sheet_name if isinstance(sheet_name, str) else None,
         "n_rows": n_rows,
+        "n_rows": n_rows,
         "n_cols": n_cols,
+        "source_metadata": source_metadata,
     }
     _save_cache_metadata(metadata)
     
@@ -184,6 +191,8 @@ def build_parquet_cache_from_df(
     display_name: str,
     original_file: str = "transformed",
     sheet_name: str | None = None,
+    transform_code: str | None = None,
+    source_metadata: dict | None = None,
 ) -> Tuple[Path, int, int]:
     """Build parquet cache directly from a DataFrame (for transformed data).
     
@@ -219,6 +228,8 @@ def build_parquet_cache_from_df(
         "n_rows": n_rows,
         "n_cols": n_cols,
         "transformed": True,
+        "transform_code": transform_code,
+        "source_metadata": source_metadata,
     }
     _save_cache_metadata(metadata)
     
