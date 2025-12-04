@@ -216,36 +216,6 @@ if not check_password():
 # Main Application (Authenticated)
 # =============================================================================
 
-# Sidebar
-with st.sidebar:
-    st.title("🛍️ Menu")
-    
-    # OneDrive status
-    onedrive_ok, onedrive_err = onedrive_config.is_configured()
-    if onedrive_ok:
-        st.success("☁️ OneDrive: Terhubung")
-    else:
-        st.warning(f"☁️ OneDrive: {onedrive_err}")
-    
-    # Show cached tables count
-    cached_list = get_enriched_cached_data()
-    st.info(f"📊 {len(cached_list)} tabel tersimpan")
-    
-    st.divider()
-    
-    # Clear chat button
-    if st.button("🗑️ Hapus Riwayat Chat", use_container_width=True):
-        st.session_state.messages = []
-        st.session_state.pending_question = None
-        st.session_state.show_table_selector = False
-        st.rerun()
-        
-    st.divider()
-    if st.button("🔒 Logout", use_container_width=True):
-        logger.info(f"User {st.session_state.user_id} logged out")
-        st.session_state.authenticated = False
-        st.rerun()
-
 # Helper Functions
 def get_enriched_cached_data() -> List[CachedDataInfo]:
     """Get cached data and enrich with metadata (descriptions) from SQLite."""
@@ -277,6 +247,38 @@ def get_enriched_cached_data() -> List[CachedDataInfo]:
             logger.error(f"Failed to enrich cached data: {e}")
             
     return cached_list
+
+# Sidebar
+with st.sidebar:
+    st.title("🛍️ Menu")
+    
+    # OneDrive status
+    onedrive_ok, onedrive_err = onedrive_config.is_configured()
+    if onedrive_ok:
+        st.success("☁️ OneDrive: Terhubung")
+    else:
+        st.warning(f"☁️ OneDrive: {onedrive_err}")
+    
+    # Show cached tables count
+    cached_list = get_enriched_cached_data()
+    st.info(f"📊 {len(cached_list)} tabel tersimpan")
+    
+    st.divider()
+    
+    # Clear chat button
+    if st.button("🗑️ Hapus Riwayat Chat", use_container_width=True):
+        st.session_state.messages = []
+        st.session_state.pending_question = None
+        st.session_state.show_table_selector = False
+        st.rerun()
+        
+    st.divider()
+    if st.button("🔒 Logout", use_container_width=True):
+        logger.info(f"User {st.session_state.user_id} logged out")
+        st.session_state.authenticated = False
+        st.rerun()
+
+
 
 
 def rank_tables_by_relevance(question: str, tables: List[CachedDataInfo]) -> List[Tuple[CachedDataInfo, float]]:
