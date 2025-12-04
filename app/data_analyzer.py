@@ -784,7 +784,6 @@ OUTPUT HARUS JSON VALID."""
                     needs_transform=True,
                     preview_df=df.head(20).copy(),
                     original_df=original_df,
-                    original_df=original_df,
                     validation_notes=[f"Blocked: AI mencoba {error_msg}"],
                     explanation="Gagal: Kode berbahaya"
                 )
@@ -807,7 +806,6 @@ OUTPUT HARUS JSON VALID."""
                 transform_code=code,
                 needs_transform=True,
                 preview_df=df.head(20).copy(),  # Show original if error
-                original_df=original_df,
                 original_df=original_df,
                 validation_notes=[f"Error eksekusi: {error}"],
                 explanation=f"Gagal eksekusi: {error}"
@@ -839,7 +837,6 @@ OUTPUT HARUS JSON VALID."""
             transform_code=previous_code,
             needs_transform=True,
             preview_df=df.head(20).copy(),
-            original_df=original_df,
             original_df=original_df,
             validation_notes=[f"Exception: {str(e)}"],
             explanation=f"Error: {str(e)}"
