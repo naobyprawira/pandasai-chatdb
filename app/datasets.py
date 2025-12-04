@@ -43,7 +43,7 @@ class CachedDataInfo:
     description: Optional[str] = None
     column_descriptions: Optional[dict] = None
     stored_path: Optional[str] = None  # Original source file path
-    stored_path: Optional[str] = None  # Original source file path
+    source_url: Optional[str] = None  # Original source URL (e.g. OneDrive)
 
 
 def _load_cache_metadata() -> dict:

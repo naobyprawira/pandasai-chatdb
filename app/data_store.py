@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS datasets (
     display_name TEXT NOT NULL,
     original_name TEXT NOT NULL,
     stored_path TEXT NOT NULL,
+    source_url TEXT,
     mime_type TEXT,
     file_size INTEGER,
     n_rows INTEGER,
@@ -48,7 +49,7 @@ CREATE TABLE IF NOT EXISTS cached_sheets (
 """
 
 _LIST_SQL = """
-SELECT dataset_id, owner_id, display_name, original_name, stored_path, mime_type,
+SELECT dataset_id, owner_id, display_name, original_name, stored_path, source_url, mime_type,
        file_size, n_rows, n_cols, created_at
 FROM datasets
 WHERE owner_id = ?
@@ -56,7 +57,7 @@ ORDER BY datetime(created_at) DESC;
 """
 
 _GET_SQL = """
-SELECT dataset_id, owner_id, display_name, original_name, stored_path, mime_type,
+SELECT dataset_id, owner_id, display_name, original_name, stored_path, source_url, mime_type,
        file_size, n_rows, n_cols, created_at
 FROM datasets
 WHERE dataset_id = ? AND (owner_id = ? OR ? IS NULL)
@@ -65,7 +66,7 @@ LIMIT 1;
 
 _LIST_CACHED_SHEETS_SQL = """
 SELECT cs.cache_id, cs.dataset_id, cs.owner_id, cs.sheet_name, cs.display_name,
-       cs.n_rows, cs.n_cols, cs.cached_at, cs.description, cs.column_descriptions, d.stored_path
+       cs.n_rows, cs.n_cols, cs.cached_at, cs.description, cs.column_descriptions, d.stored_path, d.source_url
 FROM cached_sheets cs
 JOIN datasets d ON cs.dataset_id = d.dataset_id
 WHERE cs.owner_id = ?
@@ -80,6 +81,7 @@ class DatasetRecord:
     display_name: str
     original_name: str
     stored_path: str
+    source_url: Optional[str]
     mime_type: Optional[str]
     file_size: Optional[int]
     n_rows: Optional[int]
@@ -98,6 +100,7 @@ class CachedSheetRecord:
     n_cols: Optional[int]
     cached_at: str
     stored_path: str
+    source_url: Optional[str]
     description: Optional[str] = None
     column_descriptions: Optional[str] = None  # JSON string
 
@@ -131,6 +134,12 @@ class DatasetCatalog:
                 conn.execute("ALTER TABLE cached_sheets ADD COLUMN column_descriptions TEXT")
             except sqlite3.OperationalError:
                 pass
+                
+            # Migration: Add source_url to datasets
+            try:
+                conn.execute("ALTER TABLE datasets ADD COLUMN source_url TEXT")
+            except sqlite3.OperationalError:
+                pass
 
     def add_dataset(
         self,
@@ -138,6 +147,7 @@ class DatasetCatalog:
         display_name: str,
         original_name: str,
         stored_path: Path,
+        source_url: Optional[str] = None,
         mime_type: Optional[str] = None,
         file_size: Optional[int] = None,
         n_rows: Optional[int] = None,
@@ -149,9 +159,9 @@ class DatasetCatalog:
             conn.execute(
                 """
                 INSERT INTO datasets (
-                    dataset_id, owner_id, display_name, original_name, stored_path,
+                    dataset_id, owner_id, display_name, original_name, stored_path, source_url,
                     mime_type, file_size, n_rows, n_cols, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
                 """,
                 (
                     dataset_id,
@@ -159,6 +169,7 @@ class DatasetCatalog:
                     display_name,
                     original_name,
                     str(stored_path),
+                    source_url,
                     mime_type,
                     file_size,
                     n_rows,
