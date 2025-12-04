@@ -651,7 +651,6 @@ def regenerate_with_feedback(
             needs_transform=True,
             preview_df=df.head(20).copy(),
             original_df=original_df,
-            original_df=original_df,
             validation_notes=["Tidak bisa konek ke AI"],
             explanation="Gagal koneksi API"
         )
