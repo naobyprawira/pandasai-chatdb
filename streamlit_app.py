@@ -238,6 +238,7 @@ def get_enriched_cached_data() -> List[CachedDataInfo]:
                 if key in db_map:
                     sheet = db_map[key]
                     table.description = sheet.description
+                    table.stored_path = sheet.stored_path  # Populate stored_path from SQLite
                     if sheet.column_descriptions:
                         try:
                             table.column_descriptions = json.loads(sheet.column_descriptions)
@@ -1285,6 +1286,11 @@ with tab_manage:
 
 
 
+                # RE-TRANSFORM BUTTON
+                if st.button("🔄 Re-transform", key=f"retrans_{table.cache_path.stem}", use_container_width=True):
+                    st.session_state.retransform_target = table.cache_path.stem
+                    st.rerun()
+
                 # DELETE BUTTON
                 st.write("") # Spacer
                 if st.button("🗑️ Hapus Tabel", key=f"del_{table.cache_path.stem}", type="primary", use_container_width=True):
@@ -1292,3 +1298,109 @@ with tab_manage:
                         st.success("Terhapus!")
                         time.sleep(1)
                         st.rerun()
+            
+            # Re-transform UI
+            if "retransform_target" in st.session_state and st.session_state.retransform_target == table.cache_path.stem:
+                st.divider()
+                st.markdown("### 🔄 Re-transform Data")
+                st.info("Modifikasi transformasi data ini dengan memberikan instruksi baru/feedback.")
+                
+                # Show current code
+                with st.expander("Lihat Kode Transformasi Saat Ini"):
+                    st.code(table.transform_code or "# Tidak ada kode transformasi tersimpan", language="python")
+                
+                feedback = st.text_area(
+                    "Feedback / Instruksi Baru:",
+                    placeholder="Contoh: Filter juga untuk tahun > 2023...",
+                    key=f"feedback_{table.cache_path.stem}"
+                )
+                
+                col_rt_1, col_rt_2 = st.columns([1, 1])
+                
+                with col_rt_1:
+                    if st.button("▶️ Preview Transformasi", key=f"prev_retrans_{table.cache_path.stem}", type="primary"):
+                        if not feedback:
+                            st.warning("Masukkan feedback terlebih dahulu.")
+                        else:
+                            with st.spinner("Menganalisis & Transformasi ulang..."):
+                                try:
+                                    # Load original data
+                                    # We need original path. stored_path in CachedDataInfo is now populated.
+                                    if not table.stored_path:
+                                        st.error("Path file asli tidak ditemukan.")
+                                    else:
+                                        # Load original DF
+                                        full_df = _read_dataframe_raw(Path(table.stored_path), sheet_name=table.sheet_name)
+                                        
+                                        # Regenerate
+                                        result = regenerate_with_feedback(
+                                            full_df.head(100), # Sample for generation
+                                            table.transform_code or "",
+                                            feedback
+                                        )
+                                        
+                                        # Execute on sample for preview
+                                        preview_df, error = execute_transform(full_df.head(100).copy(), result.transform_code)
+                                        
+                                        if error:
+                                            st.error(f"Error preview: {error}")
+                                        else:
+                                            st.session_state.retransform_preview = preview_df
+                                            st.session_state.retransform_code = result.transform_code
+                                            st.session_state.retransform_result = result # Store full result if needed
+                                            st.success("Preview berhasil!")
+                                except Exception as e:
+                                    st.error(f"Gagal re-transform: {e}")
+                
+                with col_rt_2:
+                    if st.button("❌ Batal", key=f"cancel_retrans_{table.cache_path.stem}"):
+                        st.session_state.retransform_target = None
+                        if "retransform_preview" in st.session_state:
+                            del st.session_state.retransform_preview
+                        st.rerun()
+
+                # Show Preview if available
+                if "retransform_preview" in st.session_state and st.session_state.retransform_target == table.cache_path.stem:
+                    st.markdown("#### Preview Hasil Baru")
+                    st.dataframe(_sanitize_df_for_display(st.session_state.retransform_preview.head(20)), use_container_width=True)
+                    
+                    with st.expander("Lihat Kode Baru"):
+                        st.code(st.session_state.retransform_code, language="python")
+                    
+                    if st.button("💾 Simpan Perubahan", key=f"save_retrans_{table.cache_path.stem}", type="primary"):
+                        with st.spinner("Menyimpan perubahan..."):
+                            try:
+                                # Apply to FULL data
+                                full_df = _read_dataframe_raw(Path(table.stored_path), sheet_name=table.sheet_name)
+                                final_df, error = execute_transform(full_df, st.session_state.retransform_code)
+                                
+                                if error:
+                                    st.error(f"Gagal menerapkan ke data penuh: {error}")
+                                else:
+                                    # Update Cache
+                                    from app.datasets import update_existing_parquet_cache
+                                    n_rows, n_cols = update_existing_parquet_cache(
+                                        table.cache_path,
+                                        final_df,
+                                        st.session_state.retransform_code
+                                    )
+                                    
+                                    # Update SQLite Stats
+                                    # We need cache_id. 
+                                    target_cache_id = None
+                                    user_sheets = catalog.list_cached_sheets(st.session_state.user_id)
+                                    for sheet in user_sheets:
+                                        if sheet.display_name == table.display_name and sheet.sheet_name == table.sheet_name:
+                                            target_cache_id = sheet.cache_id
+                                            break
+                                    
+                                    if target_cache_id:
+                                        catalog.update_cached_sheet_stats(target_cache_id, n_rows, n_cols)
+                                    
+                                    st.success(f"✅ Berhasil disimpan! ({n_rows:,} baris)")
+                                    st.session_state.retransform_target = None
+                                    del st.session_state.retransform_preview
+                                    time.sleep(1)
+                                    st.rerun()
+                            except Exception as e:
+                                st.error(f"Gagal menyimpan: {e}")

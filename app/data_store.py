@@ -282,6 +282,23 @@ class DatasetCatalog:
                 SET description = ?, column_descriptions = ?
                 WHERE cache_id = ?
                 """,
-                (description, col_desc_json, cache_id),
+            )
+            return cur.rowcount > 0
+
+    def update_cached_sheet_stats(
+        self,
+        cache_id: str,
+        n_rows: int,
+        n_cols: int
+    ) -> bool:
+        """Update row/col counts for a cached sheet."""
+        with self._lock, self._connect() as conn:
+            cur = conn.execute(
+                """
+                UPDATE cached_sheets 
+                SET n_rows = ?, n_cols = ?
+                WHERE cache_id = ?
+                """,
+                (n_rows, n_cols, cache_id),
             )
             return cur.rowcount > 0

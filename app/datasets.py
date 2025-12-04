@@ -42,6 +42,8 @@ class CachedDataInfo:
     source_metadata: Optional[dict] = None
     description: Optional[str] = None
     column_descriptions: Optional[dict] = None
+    stored_path: Optional[str] = None  # Original source file path
+    stored_path: Optional[str] = None  # Original source file path
 
 
 def _load_cache_metadata() -> dict:
@@ -236,6 +238,35 @@ def build_parquet_cache_from_df(
     _save_cache_metadata(metadata)
     
     return cache_path, n_rows, n_cols
+
+
+def update_existing_parquet_cache(
+    cache_path: Path,
+    df: DataFrame,
+    transform_code: str | None = None,
+) -> Tuple[int, int]:
+    """Update an existing parquet cache file with new data (overwrite)."""
+    
+    # Process and save
+    df = _downcast_dtypes(df.copy())
+    df = _sanitize_for_parquet(df)
+    n_rows, n_cols = df.shape
+    df.to_parquet(cache_path, index=False)
+    
+    # Update metadata
+    cache_key = cache_path.stem
+    metadata = _load_cache_metadata()
+    
+    if cache_key in metadata:
+        metadata[cache_key]["n_rows"] = n_rows
+        metadata[cache_key]["n_cols"] = n_cols
+        if transform_code:
+            metadata[cache_key]["transform_code"] = transform_code
+            metadata[cache_key]["transformed"] = True
+            
+        _save_cache_metadata(metadata)
+    
+    return n_rows, n_cols
 
 
 def _sanitize_for_parquet(df: DataFrame) -> DataFrame:
