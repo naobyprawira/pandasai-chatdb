@@ -418,11 +418,7 @@ def handle_transform_upload(stored_path, selected_sheet, result, display_name, r
         )
         st.success(f"✅ Data berhasil di-cache ({n_rows:,} baris)")
         
-        # 2. Upload ORIGINAL file to OneDrive (as requested)
-        if onedrive_ok:
-            with st.spinner("☁️ Mengupload file asli ke OneDrive..."):
-                onedrive_client.upload_file(stored_path, record.original_name)
-                st.success(f"✅ File asli '{record.original_name}' berhasil di-upload ke OneDrive!")
+
         
         st.balloons()
         st.session_state.analysis_result = None
@@ -832,7 +828,7 @@ with tab_onedrive:
 
 with tab_upload:
     st.subheader("⬆️ Upload File")
-    st.write("Upload file CSV atau Excel. File akan dianalisis, di-cache, dan **di-upload ke OneDrive**.")
+    st.write("Upload file CSV atau Excel. File akan dianalisis dan di-cache.")
     
     upload = st.file_uploader(
         "Pilih file",
@@ -935,7 +931,7 @@ with tab_upload:
                                 st.error(f"Gagal menganalisis: {e}")
                 
                 with col_skip:
-                    if st.button("⏭️ Skip, Cache & Upload", key="skip_transform"):
+                    if st.button("⏭️ Skip & Cache", key="skip_transform"):
                         with st.spinner("Memproses..."):
                             try:
                                 full_df = _read_dataframe_raw(stored_path, sheet_name=selected_sheet)
@@ -947,11 +943,7 @@ with tab_upload:
                                 )
                                 st.success(f"✅ '{display_name}' ({n_rows:,} baris) di-cache!")
                                 
-                                # Trigger OneDrive Upload
-                                if onedrive_ok:
-                                    with st.spinner("☁️ Mengupload ke OneDrive..."):
-                                        onedrive_client.upload_file(stored_path, record.original_name)
-                                        st.success(f"✅ File '{record.original_name}' berhasil di-upload ke OneDrive!")
+
                                 
                                 st.balloons()
                                 st.rerun()
@@ -1015,7 +1007,7 @@ with tab_upload:
                             
                             st.divider()
                             
-                            if st.button("✅ Terapkan, Cache & Upload", key="apply_transform_upload", type="primary"):
+                            if st.button("✅ Terapkan & Cache", key="apply_transform_upload", type="primary"):
                                 handle_transform_upload(stored_path, selected_sheet, result, display_name, record, onedrive_ok)
 
         except Exception as e:
