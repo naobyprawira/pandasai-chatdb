@@ -304,13 +304,13 @@ RULES KETAT:
 
 FORMAT JAWABAN (JSON):
 
-{
+{{
   "needs_transform": true/false,
   "issues": ["masalah 1", "masalah 2"],
   "summary": "Ringkasan singkat",
   "explanation": "Penjelasan detail langkah demi langkah untuk user non-teknis (contoh: 'Filter baris kosong, lalu ubah format tanggal')",
   "code": "normalized_df = df.copy()..."
-}
+}}
 """
 
     system_instruction = """Kamu adalah pandas expert. Normalisasi tabel dengan cara TRADISIONAL dan SIMPLE.
@@ -699,11 +699,11 @@ RULES:
 ⚠️ PENTING: Hasil akhir HARUS disimpan di variable `normalized_df` (bukan df, df_new, dll). Jangan ubah `df` original.
 
 FORMAT (JSON):
-{
+{{
   "summary": "Penjelasan singkat",
   "explanation": "Penjelasan detail langkah demi langkah untuk user non-teknis",
   "code": "normalized_df = ..."
-}
+}}
 """
 
     try:
