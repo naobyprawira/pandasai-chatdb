@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
+import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -39,6 +41,8 @@ CREATE TABLE IF NOT EXISTS cached_sheets (
     n_rows INTEGER,
     n_cols INTEGER,
     cached_at TEXT NOT NULL,
+    description TEXT,
+    column_descriptions TEXT,
     FOREIGN KEY (dataset_id) REFERENCES datasets(dataset_id) ON DELETE CASCADE
 );
 """
@@ -61,7 +65,7 @@ LIMIT 1;
 
 _LIST_CACHED_SHEETS_SQL = """
 SELECT cs.cache_id, cs.dataset_id, cs.owner_id, cs.sheet_name, cs.display_name,
-       cs.n_rows, cs.n_cols, cs.cached_at, d.stored_path
+       cs.n_rows, cs.n_cols, cs.cached_at, cs.description, cs.column_descriptions, d.stored_path
 FROM cached_sheets cs
 JOIN datasets d ON cs.dataset_id = d.dataset_id
 WHERE cs.owner_id = ?
@@ -94,6 +98,8 @@ class CachedSheetRecord:
     n_cols: Optional[int]
     cached_at: str
     stored_path: str
+    description: Optional[str] = None
+    column_descriptions: Optional[str] = None  # JSON string
 
 
 class DatasetCatalog:
@@ -102,6 +108,7 @@ class DatasetCatalog:
     def __init__(self, db_path: Path = CATALOG_DB) -> None:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.Lock()
         self._ensure_tables()
 
     def _connect(self) -> sqlite3.Connection:
@@ -113,6 +120,17 @@ class DatasetCatalog:
         with self._connect() as conn:
             conn.execute(_CREATE_TABLE_SQL)
             conn.execute(_CREATE_CACHED_SHEETS_SQL)
+            
+            # Migration: Add new columns if they don't exist
+            try:
+                conn.execute("ALTER TABLE cached_sheets ADD COLUMN description TEXT")
+            except sqlite3.OperationalError:
+                pass  # Column likely exists
+                
+            try:
+                conn.execute("ALTER TABLE cached_sheets ADD COLUMN column_descriptions TEXT")
+            except sqlite3.OperationalError:
+                pass
 
     def add_dataset(
         self,
@@ -187,11 +205,16 @@ class DatasetCatalog:
         display_name: str,
         n_rows: Optional[int] = None,
         n_cols: Optional[int] = None,
+        description: Optional[str] = None,
+        column_descriptions: Optional[dict] = None,
     ) -> str:
         """Register a cached sheet. Returns cache_id."""
         cache_id = str(uuid4())
         cached_at = datetime.now(UTC).isoformat()
-        with self._connect() as conn:
+        
+        col_desc_json = json.dumps(column_descriptions) if column_descriptions else None
+        
+        with self._lock, self._connect() as conn:
             # Check if already cached
             existing = conn.execute(
                 "SELECT cache_id FROM cached_sheets WHERE dataset_id = ? AND (sheet_name = ? OR (sheet_name IS NULL AND ? IS NULL))",
@@ -204,10 +227,10 @@ class DatasetCatalog:
                 """
                 INSERT INTO cached_sheets (
                     cache_id, dataset_id, owner_id, sheet_name, display_name,
-                    n_rows, n_cols, cached_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+                    n_rows, n_cols, cached_at, description, column_descriptions
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
                 """,
-                (cache_id, dataset_id, owner_id, sheet_name, display_name, n_rows, n_cols, cached_at),
+                (cache_id, dataset_id, owner_id, sheet_name, display_name, n_rows, n_cols, cached_at, description, col_desc_json),
             )
         logger.info(f"Created cache for dataset {dataset_id}, sheet {sheet_name} (ID: {cache_id})")
         return cache_id
@@ -224,7 +247,7 @@ class DatasetCatalog:
             row = conn.execute(
                 """
                 SELECT cs.cache_id, cs.dataset_id, cs.owner_id, cs.sheet_name, cs.display_name,
-                       cs.n_rows, cs.n_cols, cs.cached_at, d.stored_path
+                       cs.n_rows, cs.n_cols, cs.cached_at, cs.description, cs.column_descriptions, d.stored_path
                 FROM cached_sheets cs
                 JOIN datasets d ON cs.dataset_id = d.dataset_id
                 WHERE cs.cache_id = ?
@@ -240,5 +263,25 @@ class DatasetCatalog:
             cur = conn.execute(
                 "DELETE FROM cached_sheets WHERE cache_id = ? AND owner_id = ?",
                 (cache_id, owner_id),
+            )
+            return cur.rowcount > 0
+
+    def update_cached_sheet_metadata(
+        self,
+        cache_id: str,
+        description: Optional[str] = None,
+        column_descriptions: Optional[dict] = None
+    ) -> bool:
+        """Update metadata for a cached sheet."""
+        col_desc_json = json.dumps(column_descriptions) if column_descriptions else None
+        
+        with self._lock, self._connect() as conn:
+            cur = conn.execute(
+                """
+                UPDATE cached_sheets 
+                SET description = ?, column_descriptions = ?
+                WHERE cache_id = ?
+                """,
+                (description, col_desc_json, cache_id),
             )
             return cur.rowcount > 0

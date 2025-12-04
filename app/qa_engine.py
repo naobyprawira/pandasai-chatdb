@@ -50,6 +50,8 @@ print(f"Kolom tersedia:", available_cols)
 ## Sample Data (5 baris pertama, untuk referensi struktur saja):
 {sample}
 
+{description_section}
+
 ## Aturan Kode
 1. LANGSUNG gunakan variable `df` - sudah berisi semua data
 2. **WAJIB FUZZY MATCH untuk search nama/teks** - lihat section di bawah!
@@ -195,7 +197,7 @@ WAJIB menyebut angka spesifik dan identifier dari data.
 """
 
 
-def _build_system_prompt(df: DataFrame) -> str:
+def _build_system_prompt(df: DataFrame, table_description: str = None, column_descriptions: dict = None) -> str:
     cols = ", ".join(f"{c} ({df[c].dtype})" for c in df.columns)
     n_rows = len(df)
     
@@ -203,7 +205,25 @@ def _build_system_prompt(df: DataFrame) -> str:
     sample_df = df.head(SAMPLE_SIZE)
     sample = sample_df.to_csv(index=False)
     
-    return _SYSTEM_PROMPT.format(columns=cols, sample=sample, total_rows=n_rows)
+    # Build description section
+    desc_parts = []
+    if table_description:
+        desc_parts.append(f"## Deskripsi Tabel:\n{table_description}")
+    
+    if column_descriptions:
+        desc_parts.append("## Deskripsi Kolom:")
+        for col, desc in column_descriptions.items():
+            if col in df.columns:
+                desc_parts.append(f"- **{col}**: {desc}")
+    
+    description_section = "\n\n".join(desc_parts)
+    
+    return _SYSTEM_PROMPT.format(
+        columns=cols, 
+        sample=sample, 
+        total_rows=n_rows,
+        description_section=description_section
+    )
 
 
 def _extract_code(text: str) -> str:
@@ -418,7 +438,8 @@ class PandasAIClient:
         except Exception as e:
             return f"Gagal generate penjelasan: {str(e)}"
 
-    def ask(self, df: DataFrame, prompt: str, explain: bool = True) -> QAResult:
+    def ask(self, df: DataFrame, prompt: str, explain: bool = True, 
+            table_description: str = None, column_descriptions: dict = None) -> QAResult:
         """
         Ask a question about the DataFrame with iterative retry (max 3 attempts).
         
@@ -436,7 +457,7 @@ class PandasAIClient:
         MAX_ITERATIONS = 3
         error_history = []
         validation_notes = []
-        system_prompt = _build_system_prompt(df)
+        system_prompt = _build_system_prompt(df, table_description, column_descriptions)
         last_failed_code = ""
         
         logger.info(f"Starting ask() with prompt: {prompt[:50]}...")

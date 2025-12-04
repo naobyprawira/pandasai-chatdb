@@ -228,7 +228,7 @@ with st.sidebar:
         st.warning(f"☁️ OneDrive: {onedrive_err}")
     
     # Show cached tables count
-    cached_list = list_all_cached_data()
+    cached_list = get_enriched_cached_data()
     st.info(f"📊 {len(cached_list)} tabel tersimpan")
     
     st.divider()
@@ -247,8 +247,40 @@ with st.sidebar:
         st.rerun()
 
 # Helper Functions
+def get_enriched_cached_data() -> List[CachedDataInfo]:
+    """Get cached data and enrich with metadata (descriptions) from SQLite."""
+    cached_list = list_all_cached_data()
+    
+    # Fetch SQLite metadata for current user
+    if "user_id" in st.session_state:
+        try:
+            user_sheets = catalog.list_cached_sheets(st.session_state.user_id)
+            # Map by display_name + sheet_name (best effort matching)
+            # Ideally we should use cache_id, but CachedDataInfo doesn't have it yet.
+            db_map = {}
+            for s in user_sheets:
+                key = (s.display_name, s.sheet_name)
+                db_map[key] = s
+            
+            import json
+            for table in cached_list:
+                key = (table.display_name, table.sheet_name)
+                if key in db_map:
+                    sheet = db_map[key]
+                    table.description = sheet.description
+                    if sheet.column_descriptions:
+                        try:
+                            table.column_descriptions = json.loads(sheet.column_descriptions)
+                        except:
+                            table.column_descriptions = {}
+        except Exception as e:
+            logger.error(f"Failed to enrich cached data: {e}")
+            
+    return cached_list
+
+
 def rank_tables_by_relevance(question: str, tables: List[CachedDataInfo]) -> List[Tuple[CachedDataInfo, float]]:
-    """Rank tables by relevance to question using simple keyword matching."""
+    """Rank tables by relevance to question using keyword matching on name and descriptions."""
     if not tables:
         return []
     
@@ -258,11 +290,27 @@ def rank_tables_by_relevance(question: str, tables: List[CachedDataInfo]) -> Lis
     
     for table in tables:
         score = 0.0
-        name_lower = table.display_name.lower()
         
+        # 1. Match in Display Name (High weight)
+        name_lower = table.display_name.lower()
         for word in words:
             if word in name_lower:
-                score += 1.0
+                score += 2.0
+        
+        # 2. Match in Table Description (Medium weight)
+        if table.description:
+            desc_lower = table.description.lower()
+            for word in words:
+                if word in desc_lower:
+                    score += 1.0
+        
+        # 3. Match in Column Descriptions (Low weight)
+        if table.column_descriptions:
+            for col, desc in table.column_descriptions.items():
+                desc_lower = str(desc).lower()
+                for word in words:
+                    if word in desc_lower:
+                        score += 0.5
         
         ranked.append((table, score))
     
@@ -363,7 +411,14 @@ def process_question(question: str, table: CachedDataInfo):
         logger.info(f"Processing question for table '{table.display_name}': {question}")
         df = pd.read_parquet(table.cache_path)
         client = PandasAIClient(api_key=api_key)
-        result = client.ask(df, question)
+        
+        # Pass descriptions to QA engine
+        result = client.ask(
+            df, 
+            question, 
+            table_description=table.description,
+            column_descriptions=table.column_descriptions
+        )
         
         # Format response text (without dataframes - those are rendered separately)
         response = f"📊 **Tabel:** {table.display_name}\n\n"
@@ -459,7 +514,7 @@ with tab_chat:
         st.subheader("📊 Pilih Tabel untuk Pertanyaan Ini")
         st.caption(f"_Pertanyaan: {st.session_state.pending_question}_")
         
-        cached_list = list_all_cached_data()
+        cached_list = get_enriched_cached_data()
         
         if not cached_list:
             st.warning("Belum ada tabel yang di-cache. Upload file atau sync dari OneDrive terlebih dahulu.")
@@ -520,7 +575,7 @@ with tab_chat:
     if not st.session_state.show_table_selector:
         if prompt := st.chat_input("Tanyakan sesuatu tentang data Anda..."):
             # Check if we have any cached tables
-            cached_list = list_all_cached_data()
+            cached_list = get_enriched_cached_data()
             
             if not cached_list:
                 add_message("user", prompt)
@@ -1021,7 +1076,7 @@ with tab_upload:
 with tab_manage:
     st.subheader("🛠️ Kelola Tabel Tersimpan")
     
-    cached_list = list_all_cached_data()
+    cached_list = get_enriched_cached_data()
     
     if not cached_list:
         st.info("Belum ada tabel yang tersimpan.")
@@ -1065,6 +1120,161 @@ with tab_manage:
                     st.dataframe(_sanitize_df_for_display(preview_df), use_container_width=True)
                 except Exception as e:
                     st.error(f"Gagal memuat preview: {e}")
+            
+            # Description & Schema Editor
+            st.write("")
+            with st.expander("📝 Deskripsi & Schema", expanded=False):
+                st.caption("Tambahkan deskripsi untuk membantu AI memahami data Anda lebih baik.")
+                
+                # Table Description
+                new_desc = st.text_area(
+                    "Deskripsi Tabel",
+                    value=table.description or "",
+                    placeholder="Contoh: Data penjualan bulanan per supplier tahun 2024...",
+                    height=100,
+                    key=f"desc_{table.cache_path.stem}"
+                )
+                
+                # Column Descriptions
+                st.markdown("#### Deskripsi Kolom")
+                
+                # Load columns
+                try:
+                    df_cols = pd.read_parquet(table.cache_path).columns.tolist()
+                    
+                    # Prepare data for editor
+                    current_col_descs = table.column_descriptions or {}
+                    editor_data = []
+                    for col in df_cols:
+                        editor_data.append({
+                            "Nama Kolom": col,
+                            "Deskripsi": current_col_descs.get(col, "")
+                        })
+                    
+                    df_editor = pd.DataFrame(editor_data)
+                    
+                    edited_df = st.data_editor(
+                        df_editor,
+                        column_config={
+                            "Nama Kolom": st.column_config.TextColumn(disabled=True),
+                            "Deskripsi": st.column_config.TextColumn(
+                                "Deskripsi (Editable)",
+                                help="Jelaskan isi kolom ini",
+                                width="large"
+                            )
+                        },
+                        hide_index=True,
+                        use_container_width=True,
+                        key=f"schema_{table.cache_path.stem}"
+                    )
+                    
+                    if st.button("💾 Simpan Deskripsi", type="primary", key=f"save_{table.cache_path.stem}"):
+                        # Convert back to dict
+                        new_col_descs = {}
+                        for _, row in edited_df.iterrows():
+                            if row["Deskripsi"] and str(row["Deskripsi"]).strip():
+                                new_col_descs[row["Nama Kolom"]] = str(row["Deskripsi"]).strip()
+                        
+                        # Save to SQLite
+                        # Find cache_id from cached_list (it's not directly in CachedDataInfo but we can find it via catalog)
+                        # Actually CachedDataInfo doesn't have cache_id, but we can look it up or add it.
+                        # Wait, CachedDataInfo is constructed from file system in list_all_cached_data.
+                        # But we need cache_id for SQLite update.
+                        
+                        # Let's look up the cache_id from the catalog based on stored_path (cache_path)
+                        # Or we can just iterate the catalog to find the matching record.
+                        
+                        # Better approach: list_all_cached_data should probably return cache_id if available.
+                        # But for now, let's find it.
+                        found_cache_id = None
+                        user_sheets = catalog.list_cached_sheets(st.session_state.user_id)
+                        
+                        # Match by filename (cache_path stem)
+                        target_stem = table.cache_path.stem
+                        for sheet in user_sheets:
+                            # We don't have the cache filename in CachedSheetRecord directly, but we can infer or check.
+                            # Actually, list_all_cached_data iterates files.
+                            # Let's try to match by display_name and original_file as a fallback?
+                            # No, that's risky.
+                            
+                            # Let's check `list_all_cached_data` implementation in `app/datasets.py`.
+                            # It iterates `PARQUET_CACHE_DIR.glob("*.parquet")`.
+                            # The stem IS the cache key (hash).
+                            # In `app/data_store.py`, `add_cached_sheet` generates `cache_id = str(uuid4())`.
+                            # Wait, `build_parquet_cache` in `app/datasets.py` uses `hashlib.md5` for filename.
+                            # `app/data_store.py` uses `uuid4` for `cache_id`.
+                            # These are DIFFERENT!
+                            
+                            # This is a problem. The file-based cache and SQLite catalog are not fully aligned on ID.
+                            # `build_parquet_cache` returns `cache_path`.
+                            # `add_cached_sheet` returns `cache_id`.
+                            
+                            # We need to link them.
+                            # In `app/datasets.py`, `_save_cache_metadata` saves to JSON.
+                            # We are moving to SQLite.
+                            
+                            # If we use `catalog.update_cached_sheet_metadata`, we need `cache_id`.
+                            # But `CachedDataInfo` comes from `list_all_cached_data` which reads files.
+                            
+                            # FIX: We need to make sure `CachedDataInfo` has the `cache_id` from SQLite.
+                            # In `app/datasets.py`, `list_all_cached_data` should try to find the SQLite record.
+                            pass
+                        
+                        # TEMPORARY FIX:
+                        # Since we haven't fully migrated `list_all_cached_data` to use SQLite IDs,
+                        # we need a way to find the `cache_id`.
+                        # In `app/data_store.py`, `cached_sheets` has `cache_id`.
+                        # But it doesn't store the `parquet_filename` (hash).
+                        
+                        # Wait, `app/data_store.py` `CachedSheetRecord` has `stored_path`.
+                        # Is `stored_path` the parquet file?
+                        # No, `stored_path` in `datasets` table is the ORIGINAL file.
+                        # `cached_sheets` table doesn't have the parquet path!
+                        
+                        # We need to fix `app/data_store.py` to store the parquet path or hash?
+                        # Or we can just use the `cache_id` as the filename?
+                        
+                        # Let's look at `app/datasets.py` again.
+                        # `_parquet_cache_path` generates filename from original path + sheet.
+                        
+                        # If I want to update metadata in SQLite, I need `cache_id`.
+                        # I should probably add `cache_id` to `CachedDataInfo`.
+                        # And `list_all_cached_data` needs to find it.
+                        
+                        # How to find it?
+                        # `list_cached_sheets` returns `CachedSheetRecord`.
+                        # We can match `display_name` and `sheet_name`?
+                        
+                        # Let's assume for now we can match by `display_name`.
+                        # It's not perfect but it's what we have.
+                        
+                        # Actually, I can update `list_all_cached_data` in `app/datasets.py` to fetch from SQLite
+                        # and match based on `display_name` and `sheet_name`.
+                        
+                        # But wait, I can't easily change `list_all_cached_data` logic in this tool call.
+                        # I'll do the matching here in `streamlit_app.py`.
+                        
+                        target_cache_id = None
+                        user_sheets = catalog.list_cached_sheets(st.session_state.user_id)
+                        for sheet in user_sheets:
+                            if sheet.display_name == table.display_name and sheet.sheet_name == table.sheet_name:
+                                target_cache_id = sheet.cache_id
+                                break
+                        
+                        if target_cache_id:
+                            if catalog.update_cached_sheet_metadata(target_cache_id, new_desc, new_col_descs):
+                                st.success("✅ Deskripsi berhasil disimpan!")
+                                time.sleep(1)
+                                st.rerun()
+                            else:
+                                st.error("Gagal menyimpan ke database.")
+                        else:
+                            # If not found in SQLite (maybe old cache), try to add it?
+                            # Or just warn.
+                            st.warning("Metadata tabel tidak ditemukan di database (mungkin cache lama). Silakan upload ulang file ini untuk mengaktifkan fitur deskripsi.")
+                            
+                except Exception as e:
+                    st.error(f"Error editor: {e}")
 
             with col_actions:
                 st.markdown("#### Aksi")

@@ -40,6 +40,8 @@ class CachedDataInfo:
     file_size_mb: float
     transform_code: Optional[str] = None
     source_metadata: Optional[dict] = None
+    description: Optional[str] = None
+    column_descriptions: Optional[dict] = None
 
 
 def _load_cache_metadata() -> dict:
