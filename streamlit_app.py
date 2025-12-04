@@ -275,7 +275,6 @@ def register_onedrive_cache(cache_path: Path, n_rows: int, n_cols: int, display_
         
         # 2. Add Cached Sheet Record
         catalog.add_cached_sheet(
-            cache_id=cache_path.stem,
             dataset_id=dataset_id,
             owner_id=st.session_state.user_id,
             sheet_name=sheet_name,
@@ -519,7 +518,6 @@ def handle_transform_upload(stored_path, selected_sheet, result, display_name, r
         
         # Register in SQLite
         catalog.add_cached_sheet(
-            cache_id=cache_path.stem,
             dataset_id=record.dataset_id,
             owner_id=st.session_state.user_id,
             sheet_name=selected_sheet,
@@ -1105,7 +1103,6 @@ with tab_upload:
                                 
                                 # Register in SQLite
                                 catalog.add_cached_sheet(
-                                    cache_id=cache_path.stem,
                                     dataset_id=record.dataset_id,
                                     owner_id=st.session_state.user_id,
                                     sheet_name=selected_sheet,
