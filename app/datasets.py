@@ -44,6 +44,7 @@ class CachedDataInfo:
     column_descriptions: Optional[dict] = None
     stored_path: Optional[str] = None  # Original source file path
     source_url: Optional[str] = None  # Original source URL (e.g. OneDrive)
+    transform_explanation: Optional[str] = None
 
 
 def _load_cache_metadata() -> dict:
@@ -93,6 +94,7 @@ def list_all_cached_data() -> List[CachedDataInfo]:
             file_size_mb=round(file_size_mb, 2),
             transform_code=info.get("transform_code"),
             source_metadata=info.get("source_metadata"),
+            transform_explanation=info.get("transform_explanation"),
         ))
     
     # Sort by cached date, newest first
@@ -144,7 +146,8 @@ def build_parquet_cache(
     path: Path, 
     sheet_name: str | int | None = None,
     display_name: str | None = None,
-    source_metadata: dict | None = None
+    source_metadata: dict | None = None,
+    transform_explanation: Optional[str] = None
 ) -> Tuple[Path, int, int]:
     """Build parquet cache for a file/sheet if it doesn't exist.
     
@@ -184,6 +187,7 @@ def build_parquet_cache(
         "n_rows": n_rows,
         "n_cols": n_cols,
         "source_metadata": source_metadata,
+        "transform_explanation": transform_explanation,
     }
     _save_cache_metadata(metadata)
     
@@ -197,6 +201,7 @@ def build_parquet_cache_from_df(
     sheet_name: str | None = None,
     transform_code: str | None = None,
     source_metadata: dict | None = None,
+    transform_explanation: Optional[str] = None,
 ) -> Tuple[Path, int, int]:
     """Build parquet cache directly from a DataFrame (for transformed data).
     
@@ -234,6 +239,7 @@ def build_parquet_cache_from_df(
         "transformed": True,
         "transform_code": transform_code,
         "source_metadata": source_metadata,
+        "transform_explanation": transform_explanation,
     }
     _save_cache_metadata(metadata)
     
@@ -244,6 +250,7 @@ def update_existing_parquet_cache(
     cache_path: Path,
     df: DataFrame,
     transform_code: str | None = None,
+    transform_explanation: Optional[str] = None,
 ) -> Tuple[int, int]:
     """Update an existing parquet cache file with new data (overwrite)."""
     
@@ -263,6 +270,9 @@ def update_existing_parquet_cache(
         if transform_code:
             metadata[cache_key]["transform_code"] = transform_code
             metadata[cache_key]["transformed"] = True
+            
+        if transform_explanation:
+            metadata[cache_key]["transform_explanation"] = transform_explanation
             
         _save_cache_metadata(metadata)
     

@@ -35,7 +35,9 @@ class TransformResult:
     validation_notes: List[str] = field(default_factory=list)  # Validation feedback
     iterations_used: int = 1  # How many iterations to get valid result
     has_error: bool = False  # True if generation failed (dangerous code, all iterations failed, etc.)
+    has_error: bool = False  # True if generation failed (dangerous code, all iterations failed, etc.)
     failed_code: str = ""  # Store the failed code for debugging
+    explanation: str = ""  # Natural language explanation of the transformation
 
 
 def _dataframe_to_sample_text(df: DataFrame, max_rows: int = MAX_SAMPLE_ROWS) -> str:
@@ -116,7 +118,8 @@ def _generate_transform_code(
 ) -> tuple[str, str, List[str], bool, str]:
     """
     Generate transformation code using AI.
-    Returns: (code, summary, issues, needs_transform, failed_code)
+    Generate transformation code using AI.
+    Returns: (code, summary, issues, needs_transform, failed_code, explanation)
     """
     sample_text = _dataframe_to_sample_text(df, MAX_SAMPLE_ROWS)
     
@@ -299,20 +302,15 @@ RULES KETAT:
 ⚠️ PENTING: PERTAHANKAN SEMUA KOLOM dari data original kecuali benar-benar tidak diperlukan
 ⚠️ WAJIB: Simpan hasil akhir ke variable `normalized_df`. Jangan ubah `df` original.
 
-FORMAT JAWABAN:
+FORMAT JAWABAN (JSON):
 
-NEEDS_TRANSFORM: YES atau NO
-
-ISSUES:
-- masalah 1
-
-SUMMARY:
-Penjelasan ringkas
-
-PYTHON_CODE:
-normalized_df = df.copy()
-...
-# END_CODE
+{
+  "needs_transform": true/false,
+  "issues": ["masalah 1", "masalah 2"],
+  "summary": "Ringkasan singkat",
+  "explanation": "Penjelasan detail langkah demi langkah untuk user non-teknis (contoh: 'Filter baris kosong, lalu ubah format tanggal')",
+  "code": "normalized_df = df.copy()..."
+}
 """
 
     system_instruction = """Kamu adalah pandas expert. Normalisasi tabel dengan cara TRADISIONAL dan SIMPLE.
@@ -329,7 +327,9 @@ DILARANG KERAS:
 - Mengambil nama kolom dari data yang mungkin duplikat
 - df.dtype (gunakan df.dtypes)
 - File I/O apapun
-- Mengubah `df` original (gunakan `normalized_df` untuk hasil)"""
+- Mengubah `df` original (gunakan `normalized_df` untuk hasil)
+
+OUTPUT HARUS JSON VALID."""
 
     response = client.responses.create(
         model=settings.default_llm_model,
@@ -340,14 +340,45 @@ DILARANG KERAS:
     
     raw_response = response.output_text
     if not raw_response:
-        return "df = df.copy()", "AI tidak memberikan response", [], False, ""
+        return "df = df.copy()", "AI tidak memberikan response", [], False, "", "Tidak ada penjelasan"
     
     return _parse_ai_response(raw_response.strip())
 
 
-def _parse_ai_response(response: str) -> tuple[str, str, List[str], bool, str]:
-    """Parse AI response. Returns: (code, summary, issues, needs_transform, failed_code)"""
+def _parse_ai_response(response: str) -> tuple[str, str, List[str], bool, str, str]:
+    """Parse AI response. Returns: (code, summary, issues, needs_transform, failed_code, explanation)"""
+    import json
     
+    # Try parsing as JSON first
+    try:
+        # Clean up potential markdown code blocks around JSON
+        cleaned_response = response.strip()
+        if cleaned_response.startswith("```json"):
+            cleaned_response = cleaned_response[7:]
+        if cleaned_response.startswith("```"):
+            cleaned_response = cleaned_response[3:]
+        if cleaned_response.endswith("```"):
+            cleaned_response = cleaned_response[:-3]
+        cleaned_response = cleaned_response.strip()
+        
+        data = json.loads(cleaned_response)
+        
+        needs_transform = data.get("needs_transform", False)
+        issues = data.get("issues", [])
+        summary = data.get("summary", "Tidak ada ringkasan")
+        explanation = data.get("explanation", "Tidak ada penjelasan detail")
+        code = data.get("code", "df = df.copy()")
+        
+        # Validate code
+        if not code or len(code) < 3:
+            code = "df = df.copy()"
+            
+        return code, summary, issues, needs_transform, "", explanation
+        
+    except json.JSONDecodeError:
+        # Fallback to regex parsing (legacy format support)
+        pass
+
     # Extract NEEDS_TRANSFORM
     needs_match = re.search(r'NEEDS_TRANSFORM:\s*(YES|NO)', response, re.IGNORECASE)
     needs_transform = needs_match.group(1).upper() == "YES" if needs_match else False
@@ -398,13 +429,14 @@ def _parse_ai_response(response: str) -> tuple[str, str, List[str], bool, str]:
                 f"❌ AI generate kode berbahaya: {error_msg}",
                 [f"Kode mencoba {error_msg}"],
                 True,
-                code
+                code,
+                "Gagal generate penjelasan karena kode berbahaya"
             )
     
     if not code or len(code) < 3:
         code = "df = df.copy()"
     
-    return code, summary, issues, needs_transform, ""
+    return code, summary, issues, needs_transform, "", summary # Use summary as explanation fallback
 
 
 def execute_transform(df: DataFrame, code: str) -> tuple[DataFrame, str]:
@@ -472,6 +504,7 @@ def analyze_and_generate_transform(
             preview_df=df.head(20).copy(),
             original_df=df.head(50).copy(),
             validation_notes=["Tidak bisa konek ke AI"],
+            explanation="Gagal koneksi API"
         )
     
     original_sample = df.head(50).copy()
@@ -485,7 +518,7 @@ def analyze_and_generate_transform(
     
     for iteration in range(1, MAX_ITERATIONS + 1):
         try:
-            code, summary, issues, needs_transform, failed_code = _generate_transform_code(
+            code, summary, issues, needs_transform, failed_code, explanation = _generate_transform_code(
                 client, df, filename, sheet_name, previous_issues, user_description, 
                 previous_code, error_history, original_df=original_sample
             )
@@ -510,6 +543,7 @@ def analyze_and_generate_transform(
                     original_df=original_sample,
                     validation_notes=["Data sudah OK"],
                     iterations_used=iteration,
+                    explanation=explanation
                 )
             
             sample_df = df.head(100).copy()
@@ -558,6 +592,7 @@ def analyze_and_generate_transform(
                 original_df=original_sample,
                 validation_notes=validation_notes + ["Success"],
                 iterations_used=iteration,
+                explanation=explanation
             )
             
         except Exception as e:
@@ -575,7 +610,8 @@ def analyze_and_generate_transform(
         original_df=original_sample,
         validation_notes=validation_notes,
         has_error=True,
-        failed_code=last_failed_code
+        failed_code=last_failed_code,
+        explanation="Gagal setelah max iterations"
     )
 
 
@@ -615,7 +651,9 @@ def regenerate_with_feedback(
             needs_transform=True,
             preview_df=df.head(20).copy(),
             original_df=original_df,
+            original_df=original_df,
             validation_notes=["Tidak bisa konek ke AI"],
+            explanation="Gagal koneksi API"
         )
     
     # Keep original for context
@@ -661,13 +699,12 @@ RULES:
 
 ⚠️ PENTING: Hasil akhir HARUS disimpan di variable `normalized_df` (bukan df, df_new, dll). Jangan ubah `df` original.
 
-FORMAT:
-
-SUMMARY: Penjelasan singkat
-
-PYTHON_CODE:
-normalized_df = ...
-# END_CODE
+FORMAT (JSON):
+{
+  "summary": "Penjelasan singkat",
+  "explanation": "Penjelasan detail langkah demi langkah untuk user non-teknis",
+  "code": "normalized_df = ..."
+}
 """
 
     try:
@@ -676,12 +713,7 @@ normalized_df = ...
 ✅ df.dtypes, split satu-satu, .astype(str), for loop
 ⚠️ WAJIB: Simpan hasil akhir ke variable `normalized_df`. Jangan ubah `df` original.
 
-Contoh BENAR:
-normalized_df = df.iloc[3:]  # OK
-normalized_df = pd.DataFrame(rows)  # OK
-
-Contoh SALAH:
-df = df.iloc[3:]  # SALAH - jangan ubah df original"""
+OUTPUT HARUS JSON VALID."""
 
         response = client.responses.create(
             model=settings.default_llm_model,
@@ -702,20 +734,39 @@ df = df.iloc[3:]  # SALAH - jangan ubah df original"""
                 validation_notes=["Response kosong"],
             )
         
-        # Parse response
-        summary = "Transformasi diperbaiki berdasarkan feedback"
-        summary_match = re.search(r'SUMMARY:\s*\n?(.*?)(?=\nPYTHON_CODE:)', raw_response, re.DOTALL | re.IGNORECASE)
-        if summary_match:
-            summary = summary_match.group(1).strip()
-        
-        code = previous_code
-        code_match = re.search(r'PYTHON_CODE:\s*\n(.*?)(?:#\s*END_CODE|$)', raw_response, re.DOTALL | re.IGNORECASE)
-        if code_match:
-            code = code_match.group(1).strip()
-            code = re.sub(r'^```python\s*\n?', '', code)
-            code = re.sub(r'^```\s*\n?', '', code)
-            code = re.sub(r'\n?```\s*$', '', code)
-            code = code.strip()
+        # Parse response (JSON)
+        import json
+        try:
+            cleaned_response = raw_response.strip()
+            if cleaned_response.startswith("```json"):
+                cleaned_response = cleaned_response[7:]
+            if cleaned_response.startswith("```"):
+                cleaned_response = cleaned_response[3:]
+            if cleaned_response.endswith("```"):
+                cleaned_response = cleaned_response[:-3]
+            cleaned_response = cleaned_response.strip()
+            
+            data = json.loads(cleaned_response)
+            summary = data.get("summary", "Transformasi diperbaiki")
+            explanation = data.get("explanation", "Tidak ada penjelasan detail")
+            code = data.get("code", previous_code)
+        except json.JSONDecodeError:
+            # Fallback regex
+            summary = "Transformasi diperbaiki berdasarkan feedback"
+            summary_match = re.search(r'SUMMARY:\s*\n?(.*?)(?=\nPYTHON_CODE:)', raw_response, re.DOTALL | re.IGNORECASE)
+            if summary_match:
+                summary = summary_match.group(1).strip()
+            
+            explanation = summary # Fallback
+            
+            code = previous_code
+            code_match = re.search(r'PYTHON_CODE:\s*\n(.*?)(?:#\s*END_CODE|$)', raw_response, re.DOTALL | re.IGNORECASE)
+            if code_match:
+                code = code_match.group(1).strip()
+                code = re.sub(r'^```python\s*\n?', '', code)
+                code = re.sub(r'^```\s*\n?', '', code)
+                code = re.sub(r'\n?```\s*$', '', code)
+                code = code.strip()
         
         # Validate code - block dangerous file read patterns
         dangerous_patterns = [
@@ -734,7 +785,9 @@ df = df.iloc[3:]  # SALAH - jangan ubah df original"""
                     needs_transform=True,
                     preview_df=df.head(20).copy(),
                     original_df=original_df,
+                    original_df=original_df,
                     validation_notes=[f"Blocked: AI mencoba {error_msg}"],
+                    explanation="Gagal: Kode berbahaya"
                 )
         
         # Handle function definitions
@@ -756,7 +809,9 @@ df = df.iloc[3:]  # SALAH - jangan ubah df original"""
                 needs_transform=True,
                 preview_df=df.head(20).copy(),  # Show original if error
                 original_df=original_df,
+                original_df=original_df,
                 validation_notes=[f"Error eksekusi: {error}"],
+                explanation=f"Gagal eksekusi: {error}"
             )
         
         # Debug: Log the transformation result
@@ -775,6 +830,7 @@ df = df.iloc[3:]  # SALAH - jangan ubah df original"""
             original_df=original_df,
             validation_notes=[f"Diperbaiki berdasarkan feedback: {user_feedback[:50]}..."],
             iterations_used=1,
+            explanation=explanation
         )
         
     except Exception as e:
@@ -785,7 +841,9 @@ df = df.iloc[3:]  # SALAH - jangan ubah df original"""
             needs_transform=True,
             preview_df=df.head(20).copy(),
             original_df=original_df,
+            original_df=original_df,
             validation_notes=[f"Exception: {str(e)}"],
+            explanation=f"Error: {str(e)}"
         )
 
 

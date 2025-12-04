@@ -239,7 +239,9 @@ def get_enriched_cached_data() -> List[CachedDataInfo]:
                     sheet = db_map[key]
                     table.description = sheet.description
                     table.stored_path = sheet.stored_path  # Populate stored_path from SQLite
+
                     table.source_url = sheet.source_url    # Populate source_url from SQLite
+                    table.transform_explanation = sheet.transform_explanation # Populate explanation
                     if sheet.column_descriptions:
                         try:
                             table.column_descriptions = json.loads(sheet.column_descriptions)
@@ -249,6 +251,44 @@ def get_enriched_cached_data() -> List[CachedDataInfo]:
             logger.error(f"Failed to enrich cached data: {e}")
             
     return cached_list
+
+def register_onedrive_cache(cache_path: Path, n_rows: int, n_cols: int, display_name: str, sheet_name: str | None, source_metadata: dict, transform_explanation: str | None = None):
+    """Register a OneDrive-cached file into the SQLite catalog."""
+    try:
+        # 1. Add Dataset Record
+        # We don't have a permanent stored path for OneDrive files (it's temp), 
+        # but we need to store something. We can store the temp path or a placeholder.
+        # Ideally, we should store the 'webUrl' as source_url.
+        
+        dataset_id = catalog.add_dataset(
+            owner_id=st.session_state.user_id,
+            display_name=display_name,
+            original_name=source_metadata.get("file_path", display_name),
+            stored_path=Path(source_metadata.get("file_path", "onedrive_remote")), # Placeholder or remote path
+            source_url=source_metadata.get("webUrl"),
+            mime_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" if sheet_name else "text/csv",
+            file_size=0, # Unknown
+            n_rows=n_rows,
+            n_cols=n_cols
+        )
+        
+        # 2. Add Cached Sheet Record
+        catalog.add_cached_sheet(
+            cache_id=cache_path.stem,
+            dataset_id=dataset_id,
+            owner_id=st.session_state.user_id,
+            sheet_name=sheet_name,
+            display_name=display_name,
+            n_rows=n_rows,
+            n_cols=n_cols,
+            n_rows=n_rows,
+            n_cols=n_cols,
+            cached_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            transform_explanation=transform_explanation
+        )
+        logger.info(f"Registered OneDrive cache in SQLite: {display_name}")
+    except Exception as e:
+        logger.error(f"Failed to register OneDrive cache in SQLite: {e}")
 
 # Sidebar
 with st.sidebar:
@@ -473,7 +513,21 @@ def handle_transform_upload(stored_path, selected_sheet, result, display_name, r
             transformed_df,
             display_name=f"{display_name} (transformed)",
             original_file=record.display_name,
-            sheet_name=selected_sheet
+            sheet_name=selected_sheet,
+            transform_code=result.transform_code,
+            transform_explanation=result.explanation
+        )
+        
+        # Register in SQLite
+        catalog.add_cached_sheet(
+            cache_id=cache_path.stem,
+            dataset_id=record.dataset_id,
+            owner_id=st.session_state.user_id,
+            sheet_name=selected_sheet,
+            display_name=f"{display_name} (transformed)",
+            n_rows=n_rows,
+            n_cols=n_cols,
+            transform_explanation=result.explanation
         )
         st.success(f"✅ Data berhasil di-cache ({n_rows:,} baris)")
         
@@ -738,7 +792,12 @@ with tab_onedrive:
                                     
                                     if result.needs_transform and result.transform_code:
                                         st.subheader("💡 Transformasi")
-                                        with st.expander("Lihat kode Python", expanded=False):
+                                        
+                                        # Show Explanation
+                                        if result.explanation:
+                                            st.info(f"**Penjelasan:**\n{result.explanation}")
+                                        
+                                        with st.expander("🐍 Lihat kode Python (untuk debugging)", expanded=False):
                                             st.code(result.transform_code, language="python")
                                         
                                         # Preview
@@ -806,8 +865,22 @@ with tab_onedrive:
                                                                 "file_path": selected_file["path"],
                                                                 "download_url": selected_file.get("downloadUrl"),
                                                                 "webUrl": selected_file.get("webUrl"),
-                                                            }
+                                                            },
+                                                            transform_explanation=result.explanation
                                                         )
+                                                        # Register in SQLite
+                                                        register_onedrive_cache(
+                                                            cache_path, n_rows, n_cols, display_name, selected_sheet,
+                                                            {
+                                                                "source": "onedrive",
+                                                                "file_id": selected_file["id"],
+                                                                "file_path": selected_file["path"],
+                                                                "download_url": selected_file.get("downloadUrl"),
+                                                                "webUrl": selected_file.get("webUrl"),
+                                                            },
+                                                            transform_explanation=result.explanation
+                                                        )
+                                                        
                                                         st.session_state.flash_message = f"✅ Berhasil! Tabel '{display_name}' ({n_rows:,} baris) telah di-cache."
                                                         st.balloons()
                                                         reset_onedrive_state()
@@ -834,7 +907,21 @@ with tab_onedrive:
                                                 "file_path": selected_file["path"],
                                                 "download_url": selected_file.get("downloadUrl"),
                                                 "webUrl": selected_file.get("webUrl"),
-                                            }
+                                            },
+                                            transform_explanation="No transformation applied"
+                                        )
+                                        
+                                        # Register in SQLite
+                                        register_onedrive_cache(
+                                            cache_path, n_rows, n_cols, display_name, selected_sheet,
+                                            {
+                                                "source": "onedrive",
+                                                "file_id": selected_file["id"],
+                                                "file_path": selected_file["path"],
+                                                "download_url": selected_file.get("downloadUrl"),
+                                                "webUrl": selected_file.get("webUrl"),
+                                            },
+                                            transform_explanation="No transformation applied"
                                         )
                                         
                                         temp_path.unlink(missing_ok=True)
@@ -869,7 +956,22 @@ with tab_onedrive:
                                         "file_id": selected_file["id"],
                                         "file_path": selected_file["path"],
                                         "download_url": selected_file.get("downloadUrl"),
-                                    }
+                                        "webUrl": selected_file.get("webUrl"), # Ensure webUrl is passed
+                                    },
+                                    transform_explanation="No transformation applied"
+                                )
+                                
+                                # Register in SQLite
+                                register_onedrive_cache(
+                                    cache_path, n_rows, n_cols, display_name, None,
+                                    {
+                                        "source": "onedrive",
+                                        "file_id": selected_file["id"],
+                                        "file_path": selected_file["path"],
+                                        "download_url": selected_file.get("downloadUrl"),
+                                        "webUrl": selected_file.get("webUrl"),
+                                    },
+                                    transform_explanation="No transformation applied"
                                 )
                                 temp_path.unlink(missing_ok=True)
                                 temp_path.unlink(missing_ok=True)
@@ -990,7 +1092,7 @@ with tab_upload:
                                 st.error(f"Gagal menganalisis: {e}")
                 
                 with col_skip:
-                    if st.button("⏭️ Skip & Cache", key="skip_transform"):
+                    if st.button("⏭️ Cache Tanpa Transformasi", key="skip_transform"):
                         with st.spinner("Memproses..."):
                             try:
                                 full_df = _read_dataframe_raw(stored_path, sheet_name=selected_sheet)
@@ -998,7 +1100,20 @@ with tab_upload:
                                     full_df,
                                     display_name=display_name,
                                     original_file=record.display_name,
-                                    sheet_name=selected_sheet
+                                    sheet_name=selected_sheet,
+                                    transform_explanation="No transformation applied"
+                                )
+                                
+                                # Register in SQLite
+                                catalog.add_cached_sheet(
+                                    cache_id=cache_path.stem,
+                                    dataset_id=record.dataset_id,
+                                    owner_id=st.session_state.user_id,
+                                    sheet_name=selected_sheet,
+                                    display_name=display_name,
+                                    n_rows=n_rows,
+                                    n_cols=n_cols,
+                                    transform_explanation="No transformation applied"
                                 )
                                 st.success(f"✅ '{display_name}' ({n_rows:,} baris) di-cache!")
                                 
@@ -1023,7 +1138,12 @@ with tab_upload:
                         
                         if result.needs_transform and result.transform_code:
                             st.subheader("💡 Transformasi")
-                            with st.expander("Lihat kode Python", expanded=False):
+                            
+                            # Show Explanation
+                            if result.explanation:
+                                st.info(f"**Penjelasan:**\n{result.explanation}")
+                            
+                            with st.expander("🐍 Lihat kode Python (untuk debugging)", expanded=False):
                                 st.code(result.transform_code, language="python")
                             
                             # Preview
@@ -1449,6 +1569,7 @@ with tab_manage:
                                     else:
                                         st.session_state.retransform_preview = preview_df
                                         st.session_state.retransform_code = result.transform_code
+                                        st.session_state.retransform_explanation = result.explanation
                                         st.session_state.retransform_result = result # Store full result if needed
                                         st.success("Preview berhasil!")
                                 except Exception as e:
@@ -1464,6 +1585,10 @@ with tab_manage:
                 # Show Preview if available
                 if "retransform_preview" in st.session_state and st.session_state.retransform_target == table.cache_path.stem:
                     st.markdown("#### Preview Hasil Baru")
+                    
+                    if st.session_state.get("retransform_explanation"):
+                        st.info(f"**Penjelasan:**\n{st.session_state.retransform_explanation}")
+                        
                     st.dataframe(_sanitize_df_for_display(st.session_state.retransform_preview.head(20)), use_container_width=True)
                     
                     with st.expander("Lihat Kode Baru"):
@@ -1484,10 +1609,11 @@ with tab_manage:
                                     n_rows, n_cols = update_existing_parquet_cache(
                                         table.cache_path,
                                         final_df,
-                                        st.session_state.retransform_code
+                                        st.session_state.retransform_code,
+                                        transform_explanation=st.session_state.get("retransform_explanation")
                                     )
                                     
-                                    # Update SQLite Stats
+                                    # Update SQLite Stats & Metadata
                                     # We need cache_id. 
                                     target_cache_id = None
                                     user_sheets = catalog.list_cached_sheets(st.session_state.user_id)
@@ -1498,6 +1624,10 @@ with tab_manage:
                                     
                                     if target_cache_id:
                                         catalog.update_cached_sheet_stats(target_cache_id, n_rows, n_cols)
+                                        catalog.update_cached_sheet_metadata(
+                                            target_cache_id, 
+                                            transform_explanation=st.session_state.get("retransform_explanation")
+                                        )
                                     
                                     st.success(f"✅ Berhasil disimpan! ({n_rows:,} baris)")
                                     st.session_state.retransform_target = None

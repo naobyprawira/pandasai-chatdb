@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS cached_sheets (
     cached_at TEXT NOT NULL,
     description TEXT,
     column_descriptions TEXT,
+    transform_explanation TEXT,
     FOREIGN KEY (dataset_id) REFERENCES datasets(dataset_id) ON DELETE CASCADE
 );
 """
@@ -66,7 +67,7 @@ LIMIT 1;
 
 _LIST_CACHED_SHEETS_SQL = """
 SELECT cs.cache_id, cs.dataset_id, cs.owner_id, cs.sheet_name, cs.display_name,
-       cs.n_rows, cs.n_cols, cs.cached_at, cs.description, cs.column_descriptions, d.stored_path, d.source_url
+       cs.n_rows, cs.n_cols, cs.cached_at, cs.description, cs.column_descriptions, cs.transform_explanation, d.stored_path, d.source_url
 FROM cached_sheets cs
 JOIN datasets d ON cs.dataset_id = d.dataset_id
 WHERE cs.owner_id = ?
@@ -103,6 +104,7 @@ class CachedSheetRecord:
     source_url: Optional[str]
     description: Optional[str] = None
     column_descriptions: Optional[str] = None  # JSON string
+    transform_explanation: Optional[str] = None
 
 
 class DatasetCatalog:
@@ -132,6 +134,11 @@ class DatasetCatalog:
                 
             try:
                 conn.execute("ALTER TABLE cached_sheets ADD COLUMN column_descriptions TEXT")
+            except sqlite3.OperationalError:
+                pass
+
+            try:
+                conn.execute("ALTER TABLE cached_sheets ADD COLUMN transform_explanation TEXT")
             except sqlite3.OperationalError:
                 pass
                 
@@ -218,6 +225,7 @@ class DatasetCatalog:
         n_cols: Optional[int] = None,
         description: Optional[str] = None,
         column_descriptions: Optional[dict] = None,
+        transform_explanation: Optional[str] = None,
     ) -> str:
         """Register a cached sheet. Returns cache_id."""
         cache_id = str(uuid4())
@@ -238,10 +246,10 @@ class DatasetCatalog:
                 """
                 INSERT INTO cached_sheets (
                     cache_id, dataset_id, owner_id, sheet_name, display_name,
-                    n_rows, n_cols, cached_at, description, column_descriptions
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                    n_rows, n_cols, cached_at, description, column_descriptions, transform_explanation
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
                 """,
-                (cache_id, dataset_id, owner_id, sheet_name, display_name, n_rows, n_cols, cached_at, description, col_desc_json),
+                (cache_id, dataset_id, owner_id, sheet_name, display_name, n_rows, n_cols, cached_at, description, col_desc_json, transform_explanation),
             )
         logger.info(f"Created cache for dataset {dataset_id}, sheet {sheet_name} (ID: {cache_id})")
         return cache_id
@@ -258,7 +266,7 @@ class DatasetCatalog:
             row = conn.execute(
                 """
                 SELECT cs.cache_id, cs.dataset_id, cs.owner_id, cs.sheet_name, cs.display_name,
-                       cs.n_rows, cs.n_cols, cs.cached_at, cs.description, cs.column_descriptions, d.stored_path
+                       cs.n_rows, cs.n_cols, cs.cached_at, cs.description, cs.column_descriptions, cs.transform_explanation, d.stored_path
                 FROM cached_sheets cs
                 JOIN datasets d ON cs.dataset_id = d.dataset_id
                 WHERE cs.cache_id = ?
@@ -281,18 +289,41 @@ class DatasetCatalog:
         self,
         cache_id: str,
         description: Optional[str] = None,
-        column_descriptions: Optional[dict] = None
+        column_descriptions: Optional[dict] = None,
+        transform_explanation: Optional[str] = None,
     ) -> bool:
         """Update metadata for a cached sheet."""
         col_desc_json = json.dumps(column_descriptions) if column_descriptions else None
         
         with self._lock, self._connect() as conn:
+            # Build query dynamically based on provided fields
+            updates = []
+            params = []
+            
+            if description is not None:
+                updates.append("description = ?")
+                params.append(description)
+            
+            if column_descriptions is not None:
+                updates.append("column_descriptions = ?")
+                params.append(col_desc_json)
+                
+            if transform_explanation is not None:
+                updates.append("transform_explanation = ?")
+                params.append(transform_explanation)
+            
+            if not updates:
+                return False
+                
+            params.append(cache_id)
+            
             cur = conn.execute(
-                """
+                f"""
                 UPDATE cached_sheets 
-                SET description = ?, column_descriptions = ?
+                SET {', '.join(updates)}
                 WHERE cache_id = ?
                 """,
+                tuple(params)
             )
             return cur.rowcount > 0
 
