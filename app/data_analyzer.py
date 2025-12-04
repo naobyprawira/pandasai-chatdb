@@ -295,7 +295,9 @@ RULES KETAT:
 ❌ DILARANG: Menggunakan nama kolom dari data mentah yang mungkin duplikat
 ❌ DILARANG: df.dtype (gunakan df.dtypes), .str tanpa .astype(str)
 ❌ DILARANG: Menghapus kolom tanpa alasan jelas (df = df[['col1','col2']] atau df.drop())
+
 ⚠️ PENTING: PERTAHANKAN SEMUA KOLOM dari data original kecuali benar-benar tidak diperlukan
+⚠️ WAJIB: Simpan hasil akhir ke variable `normalized_df`. Jangan ubah `df` original.
 
 FORMAT JAWABAN:
 
@@ -308,7 +310,8 @@ SUMMARY:
 Penjelasan ringkas
 
 PYTHON_CODE:
-df = ...
+normalized_df = df.copy()
+...
 # END_CODE
 """
 
@@ -325,7 +328,8 @@ DILARANG KERAS:
 - df.stack(), df.unstack()
 - Mengambil nama kolom dari data yang mungkin duplikat
 - df.dtype (gunakan df.dtypes)
-- File I/O apapun"""
+- File I/O apapun
+- Mengubah `df` original (gunakan `normalized_df` untuk hasil)"""
 
     response = client.responses.create(
         model=settings.default_llm_model,
@@ -425,7 +429,7 @@ def execute_transform(df: DataFrame, code: str) -> tuple[DataFrame, str]:
         exec(code, global_ns)
         
         result_df = None
-        for var_name in ["df", "df_result", "df_new", "df_transformed", "df_melted", "df_final", "result"]:
+        for var_name in ["normalized_df", "df_result", "df_new", "df_transformed", "df_melted", "df_final", "result", "df"]:
             if var_name in global_ns and isinstance(global_ns[var_name], DataFrame):
                 result_df = global_ns[var_name]
                 break
@@ -654,14 +658,15 @@ FEEDBACK USER: "{user_feedback}"
 RULES:
 ❌ JANGAN: pd.read_excel/csv, df.dtype, df[['a','b']] = split, melt(), pivot()
 ✅ BOLEH: df.iloc, df.columns, df.astype(str), for loop, pd.DataFrame()
-⚠️ PENTING: Hasil akhir HARUS disimpan di variable `df` (bukan df_new, df_result, dll)
+
+⚠️ PENTING: Hasil akhir HARUS disimpan di variable `normalized_df` (bukan df, df_new, dll). Jangan ubah `df` original.
 
 FORMAT:
 
 SUMMARY: Penjelasan singkat
 
 PYTHON_CODE:
-df = ...
+normalized_df = ...
 # END_CODE
 """
 
@@ -669,14 +674,14 @@ df = ...
         system_instruction = """Fix kode pandas. Rules:
 ❌ df.dtype, df[['a','b']], file I/O, melt(), pivot()
 ✅ df.dtypes, split satu-satu, .astype(str), for loop
-⚠️ WAJIB: Simpan hasil akhir ke variable `df` (bukan df_new, df_result, dll)
+⚠️ WAJIB: Simpan hasil akhir ke variable `normalized_df`. Jangan ubah `df` original.
 
 Contoh BENAR:
-df = df.iloc[3:]  # OK
-df = pd.DataFrame(rows)  # OK - reassign ke df
+normalized_df = df.iloc[3:]  # OK
+normalized_df = pd.DataFrame(rows)  # OK
 
 Contoh SALAH:
-df_new = df.iloc[3:]  # SALAH - hasil di df_new, bukan df"""
+df = df.iloc[3:]  # SALAH - jangan ubah df original"""
 
         response = client.responses.create(
             model=settings.default_llm_model,
