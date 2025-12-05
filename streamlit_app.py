@@ -1525,21 +1525,30 @@ with tab_manage:
                                                 # But user specifically asked to fix sourcing.
                                                 
                                                 # Let's try to find the file in the root folder (common case).
-                                                files = onedrive_client.list_files()
-                                                found_id = None
+                                                # Let's try to find the file in the root folder (common case).
+                                                token = onedrive_client.get_access_token()
+                                                files = onedrive_client.list_files(token)
+                                                found_download_url = None
                                                 for f in files:
                                                     if f.get("webUrl") == table.source_url:
-                                                        found_id = f.get("id")
+                                                        found_download_url = f.get("downloadUrl")
                                                         break
                                                 
-                                                if found_id:
+                                                if found_download_url:
                                                     # Download to temp
-                                                    temp_path = Path("temp") / f"retrans_{table.cache_path.stem}_{found_id}.xlsx" # Assume excel/csv
+                                                    temp_path = Path("temp") / f"retrans_{table.cache_path.stem}.xlsx" # Assume excel/csv
                                                     temp_path.parent.mkdir(exist_ok=True)
-                                                    if onedrive_client.download_file(found_id, temp_path):
-                                                        full_df = _read_dataframe_raw(temp_path, sheet_name=table.sheet_name)
-                                                        # Update stored_path for future?
-                                                        # Maybe not, as it's temp.
+                                                    
+                                                    file_bytes = onedrive_client.download_file(found_download_url)
+                                                    with open(temp_path, "wb") as f:
+                                                        f.write(file_bytes)
+                                                    
+                                                    full_df = _read_dataframe_raw(temp_path, sheet_name=table.sheet_name)
+                                                    # Clean up temp
+                                                    try:
+                                                        temp_path.unlink()
+                                                    except:
+                                                        pass
                                             
                                         except Exception as e:
                                             logger.warning(f"Failed to download from OneDrive: {e}")
