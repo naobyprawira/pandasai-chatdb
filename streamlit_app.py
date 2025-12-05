@@ -281,7 +281,6 @@ def register_onedrive_cache(cache_path: Path, n_rows: int, n_cols: int, display_
             display_name=display_name,
             n_rows=n_rows,
             n_cols=n_cols,
-            cached_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             transform_explanation=transform_explanation
         )
         logger.info(f"Registered OneDrive cache in SQLite: {display_name}")
