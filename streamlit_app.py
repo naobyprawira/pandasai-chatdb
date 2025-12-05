@@ -242,6 +242,9 @@ def get_enriched_cached_data() -> List[CachedDataInfo]:
                     table.stored_path = sheet.stored_path  # Populate stored_path from SQLite
 
                     table.source_url = sheet.source_url    # Populate source_url from SQLite
+                    if not table.source_url and table.source_metadata:
+                         table.source_url = table.source_metadata.get("webUrl")
+                    
                     table.transform_explanation = sheet.transform_explanation # Populate explanation
                     if sheet.column_descriptions:
                         try:
@@ -1406,6 +1409,8 @@ with tab_manage:
                 # Check if we have a valid source (URL or existing local file)
                 has_valid_source = False
                 if table.source_url:
+                    has_valid_source = True
+                elif table.source_metadata and table.source_metadata.get("webUrl"):
                     has_valid_source = True
                 elif table.stored_path and os.path.exists(table.stored_path):
                     has_valid_source = True
