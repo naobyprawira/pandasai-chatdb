@@ -97,6 +97,7 @@ def list_files(token: str) -> List[dict]:
                     "path": child_path,
                     "size": item.get("size", 0),
                     "downloadUrl": item.get("@microsoft.graph.downloadUrl"),
+                    "webUrl": item.get("webUrl"),
                     "lastModified": item.get("lastModifiedDateTime"),
                 })
 
