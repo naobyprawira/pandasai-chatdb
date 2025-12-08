@@ -1528,10 +1528,14 @@ with tab_manage:
                                                 # Let's try to find the file in the root folder (common case).
                                                 token = onedrive_client.get_access_token()
                                                 files = onedrive_client.list_files(token)
+                                                logger.info(f"Retransform: Searching for {table.source_url} in {len(files)} OneDrive files.")
+                                                
                                                 found_download_url = None
                                                 for f in files:
+                                                    # logger.info(f"Comparing with: {f.get('webUrl')}") # Too verbose?
                                                     if f.get("webUrl") == table.source_url:
                                                         found_download_url = f.get("downloadUrl")
+                                                        logger.info(f"Retransform: Found match! Download URL: {found_download_url[:50]}...")
                                                         break
                                                 
                                                 if found_download_url:
@@ -1539,19 +1543,23 @@ with tab_manage:
                                                     temp_path = Path("temp") / f"retrans_{table.cache_path.stem}.xlsx" # Assume excel/csv
                                                     temp_path.parent.mkdir(exist_ok=True)
                                                     
+                                                    logger.info(f"Retransform: Downloading to {temp_path}...")
                                                     file_bytes = onedrive_client.download_file(found_download_url)
                                                     with open(temp_path, "wb") as f:
                                                         f.write(file_bytes)
                                                     
                                                     full_df = _read_dataframe_raw(temp_path, sheet_name=table.sheet_name)
+                                                    logger.info(f"Retransform: Download successful, df shape: {full_df.shape}")
                                                     # Clean up temp
                                                     try:
                                                         temp_path.unlink()
                                                     except:
                                                         pass
+                                                else:
+                                                    logger.warning(f"Retransform: No file matched source_url: {table.source_url}")
                                             
                                         except Exception as e:
-                                            logger.warning(f"Failed to download from OneDrive: {e}")
+                                            logger.error(f"Failed to download from OneDrive: {e}", exc_info=True)
 
                                     # 2. Fallback to Stored Path
                                     if full_df is None:
